@@ -1,6 +1,10 @@
 # Multi-Vector Video Search Pipeline
 
-A video semantic search pipeline using AWS Bedrock Marengo 3.0 and MongoDB Atlas with multi-vector retrieval and score-based fusion.
+A video semantic search pipeline using AWS Bedrock Marengo 3.0 and MongoDB Atlas with multi-vector retrieval and Reciprocal Rank Fusion (RRF).
+
+## Live Demo
+
+**Search UI:** https://nyfwaxmgni.us-east-1.awsapprunner.com
 
 ## Architecture Overview
 
@@ -11,17 +15,28 @@ A video semantic search pipeline using AWS Bedrock Marengo 3.0 and MongoDB Atlas
 │                 │     │                  │     │                         │
 │ tl-brice-media/ │     │  ┌────────────┐  │     │ ┌─────────────────────┐ │
 │ WBD_project/    │     │  │  Bedrock   │  │     │ │  video_embeddings   │ │
-│ Videos/         │     │  │  Marengo   │  │     │ │  (single collection)│ │
-└─────────────────┘     │  │  3.0       │  │     │ │                     │ │
-                        │  └────────────┘  │     │ │  modality_type:     │ │
-                        │                  │     │ │  - visual           │ │
-                        │  Embeddings:     │     │ │  - audio            │ │
+│ Videos/Ready/   │     │  │  Marengo   │  │     │ │  (single collection)│ │
+└────────┬────────┘     │  │  3.0       │  │     │ │                     │ │
+         │              │  └────────────┘  │     │ │  modality_type:     │ │
+    S3 Trigger          │                  │     │ │  - visual           │ │
+    (automatic)         │  Embeddings:     │     │ │  - audio            │ │
                         │  - Visual (512d) │     │ │  - transcription    │ │
                         │  - Audio (512d)  │     │ │                     │ │
                         │  - Transcription │     │ │  HNSW Vector Index  │ │
                         │    (512d)        │     │ │  + Filter Fields    │ │
                         └──────────────────┘     │ └─────────────────────┘ │
-                                                 └─────────────────────────┘
+                                                 └────────────┬────────────┘
+                                                              │
+┌─────────────────┐     ┌──────────────────┐                  │
+│   CloudFront    │     │  AWS App Runner  │                  │
+│   (CDN)         │◀────│  (Search API)    │◀─────────────────┘
+│                 │     │                  │
+│ Video streaming │     │  ┌────────────┐  │
+│ + thumbnails    │     │  │  FastAPI   │  │
+└─────────────────┘     │  │  + RRF     │  │
+                        │  │  Fusion    │  │
+                        │  └────────────┘  │
+                        └──────────────────┘
 ```
 
 ### Single Collection with Modality Filtering
@@ -32,15 +47,24 @@ This implementation uses a **single collection** (`video_embeddings`) with a `mo
 - Pre-filter by `modality_type` to search specific modalities
 - Search all modalities in one query
 - Simpler index management
-- Flexible fusion strategies (weighted, anchor-based, or direct modality selection)
+- Flexible fusion strategies
 
-### Score-Based Fusion (Equation 3)
+### Reciprocal Rank Fusion (RRF)
+
+Instead of simple weighted sum, this implementation uses **RRF** for more robust multi-modal fusion:
 
 ```
-score(s) = w_visual × sim(Q, E_visual) + w_audio × sim(Q, E_audio) + w_transcription × sim(Q, E_transcription)
+score(d) = Σ w_m / (k + rank_m(d))
 ```
 
-Default weights: `visual=0.8, audio=0.1, transcription=0.1`
+Where:
+- `k = 60` (standard RRF constant)
+- `w_m` = modality weight
+- `rank_m(d)` = rank of document d in modality m's results
+
+Default weights: `visual=0.8, audio=0.1, transcription=0.05`
+
+RRF is rank-based rather than score-based, making it more robust to score distribution differences across modalities.
 
 ---
 
@@ -48,17 +72,21 @@ Default weights: `visual=0.8, audio=0.1, transcription=0.1`
 
 ```
 s3-marengo-mongodb-pipeline/
+├── app.py                   # FastAPI web application (search API)
 ├── src/
-│   ├── lambda_function.py    # Lambda handler for video processing
-│   ├── bedrock_client.py     # Bedrock Marengo client
-│   ├── mongodb_client.py     # MongoDB embedding storage (single collection)
-│   └── query_fusion.py       # Query fusion testing script
+│   ├── lambda_function.py   # Lambda handler for video processing
+│   ├── bedrock_client.py    # Bedrock Marengo client
+│   ├── mongodb_client.py    # MongoDB embedding storage
+│   ├── search_client.py     # Video search client with RRF fusion
+│   └── query_fusion.py      # Legacy query fusion script
+├── static/
+│   └── index.html           # Search UI frontend
 ├── scripts/
-│   ├── deploy.sh             # AWS CLI deployment script
-│   └── mongodb_setup.md      # MongoDB Atlas setup guide
-├── requirements.txt          # Python dependencies
-├── .env.example              # Environment variables template
-└── README.md                 # This file
+│   ├── deploy.sh            # AWS CLI deployment script
+│   └── mongodb_setup.md     # MongoDB Atlas setup guide
+├── requirements.txt         # Python dependencies
+├── .env.example             # Environment variables template
+└── README.md                # This file
 ```
 
 ---
@@ -67,9 +95,11 @@ s3-marengo-mongodb-pipeline/
 
 - **AWS Account** with access to:
   - AWS Lambda
-  - AWS Bedrock (Marengo model enabled)
+  - AWS Bedrock (Marengo model enabled in us-east-1)
+  - AWS App Runner
   - S3 (read access to video bucket)
-- **MongoDB Atlas** account with M10+ cluster
+  - CloudFront (optional, for video CDN)
+- **MongoDB Atlas** account (free tier M0 works)
 - **Python 3.11+**
 - **AWS CLI** configured with appropriate credentials
 
@@ -98,10 +128,11 @@ cp .env.example .env
 
 Follow the detailed guide in [scripts/mongodb_setup.md](scripts/mongodb_setup.md):
 
-1. Create an M10+ cluster in **us-east-1**
+1. Create a cluster (free tier M0 works)
 2. Create database user and get connection string
 3. Create the `video_embeddings` collection with vector index
-4. Update `MONGODB_URI` in your `.env` file
+4. Whitelist IPs (or use 0.0.0.0/0 for testing)
+5. Update `MONGODB_URI` in your `.env` file
 
 ### 3. Deploy Lambda Function
 
@@ -113,48 +144,99 @@ export MONGODB_URI="your_mongodb_connection_string_here"
 ./scripts/deploy.sh
 ```
 
-### 4. Process a Video
+### 4. Video Storage Structure
+
+Videos are stored in S3 with the following structure:
+- **Original files**: `s3://tl-brice-media/WBD_project/Videos/` (1080p, full quality)
+- **Proxy files**: `s3://tl-brice-media/WBD_project/Videos/proxy/` (480p, for fast thumbnails)
+
+Proxy files are generated using AWS MediaConvert for faster thumbnail loading.
+
+### 5. Setup S3 Trigger (Automatic Processing)
+
+Configure S3 to automatically trigger Lambda when videos are uploaded:
 
 ```bash
-# Invoke Lambda to process a video
+# Add S3 trigger for the Ready folder
+aws s3api put-bucket-notification-configuration \
+  --bucket tl-brice-media \
+  --notification-configuration '{
+    "LambdaFunctionConfigurations": [{
+      "Id": "marengo-embedding-trigger",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:video-embedding-pipeline",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {"Name": "prefix", "Value": "WBD_project/Videos/Ready/"},
+            {"Name": "suffix", "Value": ".mp4"}
+          ]
+        }
+      }
+    }]
+  }'
+```
+
+### 5. Deploy Search API (App Runner)
+
+The search API runs on AWS App Runner with auto-deploy from GitHub:
+
+1. Create App Runner service connected to your GitHub repo
+2. Set environment variables:
+   - `MONGODB_URI` - MongoDB connection string
+   - `CLOUDFRONT_DOMAIN` - CloudFront distribution domain
+   - `PYTHONPATH` - `/app/deps` (for dependencies)
+3. Build command: `pip3 install -r requirements.txt -t ./deps`
+4. Start command: `python3 app.py`
+
+### 6. Process a Video
+
+**Manual invocation:**
+```bash
 aws lambda invoke \
   --function-name video-embedding-pipeline \
   --region us-east-1 \
-  --payload '{"s3_key": "WBD_project/Videos/sample.mp4", "bucket": "tl-brice-media"}' \
+  --payload '{"s3_key": "WBD_project/Videos/Ready/sample.mp4", "bucket": "tl-brice-media"}' \
   --cli-binary-format raw-in-base64-out \
   response.json
-
-cat response.json
 ```
 
-### 5. Run Search Queries
-
+**Or simply upload to S3 Ready folder** (with S3 trigger configured):
 ```bash
-# Fusion search with default weights (0.8/0.1/0.1)
-python src/query_fusion.py "a person walking on the beach"
+aws s3 cp video.mp4 s3://tl-brice-media/WBD_project/Videos/Ready/
+```
 
-# Single modality search (no fusion, pre-filtered)
-python src/query_fusion.py "someone saying hello" --single-modality transcription
+### 7. Search Videos
 
-# Custom weights for dialogue-heavy search
-python src/query_fusion.py "talking about quarterly revenue" \
-  --visual-weight 0.2 \
-  --audio-weight 0.2 \
-  --transcription-weight 0.6
+**Via Web UI:** https://nyfwaxmgni.us-east-1.awsapprunner.com
 
-# Output as JSON
-python src/query_fusion.py "explosion scene" --json --limit 5
+**Via API:**
+```bash
+curl "https://nyfwaxmgni.us-east-1.awsapprunner.com/api/search?q=someone+walking&limit=10"
 ```
 
 ---
 
 ## Lambda Event Format
 
-The Lambda function accepts events in this format:
+The Lambda function accepts events in two formats:
 
+**S3 Trigger (automatic):**
 ```json
 {
-  "s3_key": "WBD_project/Videos/file.mp4",
+  "Records": [{
+    "s3": {
+      "bucket": {"name": "tl-brice-media"},
+      "object": {"key": "WBD_project/Videos/Ready/file.mp4"}
+    }
+  }]
+}
+```
+
+**Manual invocation:**
+```json
+{
+  "s3_key": "WBD_project/Videos/Ready/file.mp4",
   "bucket": "tl-brice-media",
   "video_id": "optional-custom-id",
   "embedding_types": ["visual", "audio", "transcription"]
@@ -214,37 +296,48 @@ All embeddings stored in one collection with `modality_type` field for filtering
 |----------|---------|-------------|
 | `WEIGHT_VISUAL` | 0.8 | Weight for visual modality |
 | `WEIGHT_AUDIO` | 0.1 | Weight for audio modality |
-| `WEIGHT_TRANSCRIPTION` | 0.1 | Weight for transcription modality |
+| `WEIGHT_TRANSCRIPTION` | 0.05 | Weight for transcription modality |
 
 ### Recommended Weight Configurations
 
 | Use Case | Visual | Audio | Transcription |
 |----------|--------|-------|---------------|
-| Visual-heavy (action, scenes) | 0.8 | 0.1 | 0.1 |
+| Visual-heavy (action, scenes) | 0.8 | 0.1 | 0.05 |
 | Dialogue-focused | 0.3 | 0.1 | 0.6 |
 | Audio events (music, sounds) | 0.3 | 0.5 | 0.2 |
 | Balanced search | 0.4 | 0.3 | 0.3 |
-
-### Search Modes
-
-**Fusion Search (default):** Searches all modalities, applies weighted fusion
-```bash
-python src/query_fusion.py "a car driving fast"
-```
-
-**Single Modality:** Pre-filters to specific modality, no fusion
-```bash
-python src/query_fusion.py "crowd cheering" --single-modality audio
-```
 
 ---
 
 ## API Reference
 
-### BedrockMarengoClient
+### VideoSearchClient (search_client.py)
 
 ```python
-from bedrock_client import BedrockMarengoClient
+from src.search_client import VideoSearchClient
+
+client = VideoSearchClient(
+    mongodb_uri="mongodb+srv://...",
+    database_name="video_search"
+)
+
+# RRF fusion search with custom weights
+results = client.search(
+    query="a person running",
+    limit=10,
+    weights={"visual": 0.8, "audio": 0.1, "transcription": 0.05}
+)
+
+# Returns list of results with fusion scores and per-modality scores
+for r in results:
+    print(f"{r['video_id']} seg {r['segment_id']}: {r['fusion_score']}")
+    print(f"  Modality scores: {r['modality_scores']}")
+```
+
+### BedrockMarengoClient (bedrock_client.py)
+
+```python
+from src.bedrock_client import BedrockMarengoClient
 
 client = BedrockMarengoClient(region="us-east-1")
 
@@ -259,10 +352,10 @@ result = client.get_video_embeddings(
 query_result = client.get_text_query_embedding("a car driving fast")
 ```
 
-### MongoDBEmbeddingClient
+### MongoDBEmbeddingClient (mongodb_client.py)
 
 ```python
-from mongodb_client import MongoDBEmbeddingClient
+from src.mongodb_client import MongoDBEmbeddingClient
 
 client = MongoDBEmbeddingClient(
     connection_string="mongodb+srv://...",
@@ -276,38 +369,7 @@ result = client.store_all_segments(video_id="abc123", segments=segments)
 results = client.vector_search(
     query_embedding=embedding,
     limit=10,
-    modality_filter="visual"  # Pre-filter to visual only
-)
-
-# Search all modalities (for fusion)
-results = client.multi_modality_search(
-    query_embedding=embedding,
-    limit_per_modality=50,
-    modalities=["visual", "audio", "transcription"]
-)
-```
-
-### QueryFusionSearch
-
-```python
-from query_fusion import QueryFusionSearch
-
-search = QueryFusionSearch(
-    mongodb_client=mongodb_client,
-    bedrock_client=bedrock_client,
-    weight_visual=0.8,
-    weight_audio=0.1,
-    weight_transcription=0.1
-)
-
-# Fusion search
-results = search.search(query_text="a person running", limit=10)
-
-# Single modality search (no fusion)
-results = search.search_single_modality(
-    query_text="someone talking",
-    modality="transcription",
-    limit=10
+    modality_filter="visual"
 )
 ```
 
@@ -343,9 +405,14 @@ Based on Marengo 3.0 pricing:
 
 ### Connection Errors
 
-1. Verify MongoDB Atlas IP whitelist includes Lambda IPs
+1. Verify MongoDB Atlas IP whitelist includes Lambda/App Runner IPs
 2. Check connection string format
-3. For production, use VPC peering
+3. For testing, use 0.0.0.0/0 in Atlas Network Access
+
+### App Runner Build Fails
+
+- Use `pip3` instead of `pip` in build command
+- Install to `./deps` directory and set `PYTHONPATH=/app/deps`
 
 ---
 

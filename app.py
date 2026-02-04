@@ -177,11 +177,31 @@ async def list_videos():
 async def get_thumbnail(video_id: str, segment_id: int):
     """
     Get thumbnail for a video segment.
-    Returns a placeholder for now - can be enhanced with ffmpeg extraction.
+    Returns proxy video URL with time parameter for client-side thumbnail generation.
     """
-    # For now, return a placeholder
-    # In production, you'd extract a frame from the video at start_time
-    return {"url": f"https://via.placeholder.com/320x180?text=Segment+{segment_id}"}
+    # Look up the segment to get start_time and video path
+    client = get_search_client()
+    segment = client.get_segment(video_id, segment_id)
+
+    if not segment:
+        return {"url": f"https://via.placeholder.com/320x180?text=Not+Found"}
+
+    # Get video path and convert to proxy URL
+    s3_uri = segment.get("s3_uri", "")
+    parsed = urlparse(s3_uri)
+    key = parsed.path.lstrip("/")
+
+    # Use proxy folder for faster thumbnail loading
+    proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
+    proxy_url = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
+
+    start_time = segment.get("start_time", 0)
+
+    return {
+        "url": proxy_url,
+        "time": start_time + 3,  # Middle of 6-second segment
+        "proxy": True
+    }
 
 
 @app.get("/api/video-url")

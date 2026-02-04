@@ -236,6 +236,13 @@ class VideoSearchClient:
         ]
         return list(self.collection.aggregate(pipeline))
 
+    def get_segment(self, video_id: str, segment_id: int) -> Optional[dict]:
+        """Get a specific segment by video_id and segment_id."""
+        return self.collection.find_one(
+            {"video_id": video_id, "segment_id": segment_id},
+            {"video_id": 1, "segment_id": 1, "s3_uri": 1, "start_time": 1, "end_time": 1}
+        )
+
     def close(self):
         """Close MongoDB connection."""
         self.mongo_client.close()

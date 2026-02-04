@@ -547,6 +547,87 @@
             margin-top: 0.5rem;
             font-style: italic;
         }
+
+        /* Index Mode Toggle */
+        .index-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-left: auto;
+            padding-left: 1rem;
+            border-left: 1px solid #3d3d5c;
+        }
+
+        .index-toggle-label {
+            font-size: 0.75rem;
+            color: #9ca3af;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #3d3d5c;
+            transition: 0.3s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #fff;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #7c3aed;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .toggle-switch input:disabled + .toggle-slider {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .index-mode-indicator {
+            font-size: 0.7rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+
+        .index-mode-indicator.single {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .index-mode-indicator.multi {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+        }
     </style>
 </head>
 <body>
@@ -578,6 +659,15 @@
             <button class="modality-btn" data-mode="visual" title="Visual only">Visual</button>
             <button class="modality-btn" data-mode="audio" title="Audio only">Audio</button>
             <button class="modality-btn" data-mode="transcription" title="Speech only">Speech</button>
+
+            <div class="index-toggle">
+                <span class="index-toggle-label">Index:</span>
+                <span class="index-mode-indicator single" id="indexModeIndicator">Single</span>
+                <label class="toggle-switch" title="Toggle between single index (filter) and multi-index (separate collections)">
+                    <input type="checkbox" id="multiIndexToggle" disabled>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
         </div>
     </header>
 
@@ -773,7 +863,7 @@
 
                 if (currentMode === 'dynamic') {
                     // Dynamic intent-based routing
-                    const request = { query, limit: 50 };
+                    const request = { query, limit: 50, use_multi_index: useMultiIndex };
                     const response = await fetch('/api/search/dynamic', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -791,7 +881,8 @@
                     const request = {
                         query,
                         limit: 50,
-                        fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted'
+                        fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
+                        use_multi_index: useMultiIndex
                     };
 
                     if (currentMode === 'weighted') {
@@ -822,7 +913,8 @@
                         query,
                         limit: 50,
                         modalities: [currentMode],
-                        fusion_method: 'weighted'
+                        fusion_method: 'weighted',
+                        use_multi_index: useMultiIndex
                     };
 
                     const response = await fetch('/api/search', {
@@ -1057,6 +1149,56 @@
                 searchInput.focus();
             }
         });
+
+        // Multi-Index Toggle
+        const multiIndexToggle = document.getElementById('multiIndexToggle');
+        const indexModeIndicator = document.getElementById('indexModeIndicator');
+        let useMultiIndex = false;
+
+        // Check index mode availability on load
+        async function checkIndexMode() {
+            try {
+                const response = await fetch('/api/index-mode');
+                if (!response.ok) return;
+
+                const data = await response.json();
+
+                if (data.multi_index_available) {
+                    // Enable toggle
+                    multiIndexToggle.disabled = false;
+                    multiIndexToggle.title = 'Toggle between single index (filter) and multi-index (separate collections)';
+                } else {
+                    // Keep disabled, update tooltip
+                    multiIndexToggle.title = 'Multi-index not available. Run migration script to enable.';
+                }
+            } catch (error) {
+                console.log('Index mode check failed:', error);
+            }
+        }
+
+        // Handle toggle change
+        multiIndexToggle.addEventListener('change', () => {
+            useMultiIndex = multiIndexToggle.checked;
+
+            // Update indicator
+            if (useMultiIndex) {
+                indexModeIndicator.textContent = 'Multi';
+                indexModeIndicator.classList.remove('single');
+                indexModeIndicator.classList.add('multi');
+            } else {
+                indexModeIndicator.textContent = 'Single';
+                indexModeIndicator.classList.remove('multi');
+                indexModeIndicator.classList.add('single');
+            }
+
+            // Re-run search if we have a query
+            if (searchInput.value.trim()) {
+                performSearch();
+            }
+        });
+
+        // Initialize on page load
+        checkIndexMode();
     </script>
 </body>
 </html>

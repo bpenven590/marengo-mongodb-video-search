@@ -66,6 +66,13 @@ class VideoSearchClient:
     # Temperature for softmax in dynamic routing
     SOFTMAX_TEMPERATURE = 10.0
 
+    # Modality-specific collection names for multi-index mode
+    MODALITY_COLLECTIONS = {
+        "visual": "visual_embeddings",
+        "audio": "audio_embeddings",
+        "transcription": "transcription_embeddings"
+    }
+
     def __init__(
         self,
         mongodb_uri: str,
@@ -75,7 +82,8 @@ class VideoSearchClient:
         bedrock_region: str = "us-east-1"
     ):
         self.mongo_client = MongoClient(mongodb_uri)
-        self.collection = self.mongo_client[database_name][collection_name]
+        self.db = self.mongo_client[database_name]
+        self.collection = self.db[collection_name]
         self.index_name = index_name
         self.bedrock = BedrockMarengoClient(
             region=bedrock_region,
@@ -83,6 +91,24 @@ class VideoSearchClient:
         )
         # Anchor embeddings for dynamic routing (lazy initialized)
         self._anchor_embeddings = None
+
+        # Multi-index collections (lazy initialized)
+        self._modality_collections = None
+
+    def get_modality_collection(self, modality: str):
+        """Get the collection for a specific modality (multi-index mode)."""
+        collection_name = self.MODALITY_COLLECTIONS.get(modality)
+        if not collection_name:
+            raise ValueError(f"Unknown modality: {modality}")
+        return self.db[collection_name]
+
+    def has_multi_index_collections(self) -> bool:
+        """Check if multi-index collections exist and have data."""
+        for modality in self.MODALITY_COLLECTIONS:
+            coll = self.get_modality_collection(modality)
+            if coll.count_documents({}, limit=1) == 0:
+                return False
+        return True
 
     def initialize_anchors(self) -> dict:
         """
@@ -142,7 +168,8 @@ class VideoSearchClient:
         limit: int = 50,
         video_id: Optional[str] = None,
         fusion_method: str = "rrf",  # "rrf", "weighted", or "dynamic"
-        k_per_modality: int = 20
+        k_per_modality: int = 20,
+        use_multi_index: bool = False  # True = separate collections, False = single with filter
     ) -> list:
         """
         Search for video segments matching a text query.
@@ -154,6 +181,8 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             fusion_method: "rrf" (Reciprocal Rank Fusion) or "weighted" (score sum)
+            use_multi_index: If True, query separate collections per modality (no filter needed)
+                           If False, query single collection with modality_type filter
 
         Returns:
             List of ranked results with fusion scores
@@ -179,9 +208,17 @@ class VideoSearchClient:
             if weight == 0:
                 continue
 
-            filter_doc = {"modality_type": modality}
-            if video_id:
-                filter_doc["video_id"] = video_id
+            # Choose collection and filter based on index mode
+            if use_multi_index:
+                # Multi-index: query dedicated collection, no modality filter needed
+                collection = self.get_modality_collection(modality)
+                filter_doc = {"video_id": video_id} if video_id else {}
+            else:
+                # Single-index: query main collection with modality filter
+                collection = self.collection
+                filter_doc = {"modality_type": modality}
+                if video_id:
+                    filter_doc["video_id"] = video_id
 
             pipeline = [
                 {
@@ -191,7 +228,7 @@ class VideoSearchClient:
                         "queryVector": query_embedding,
                         "numCandidates": limit * 6,
                         "limit": limit * 2,  # Get more candidates for fusion
-                        "filter": filter_doc
+                        "filter": filter_doc if filter_doc else None
                     }
                 },
                 {
@@ -201,13 +238,21 @@ class VideoSearchClient:
                         "end_time": 1,
                         "s3_uri": 1,
                         "segment_id": 1,
-                        "modality_type": 1,
                         "score": {"$meta": "vectorSearchScore"}
                     }
                 }
             ]
 
-            results = list(self.collection.aggregate(pipeline))
+            # Remove None filter if empty
+            if not filter_doc:
+                del pipeline[0]["$vectorSearch"]["filter"]
+
+            results = list(collection.aggregate(pipeline))
+
+            # Add modality_type back for consistency (needed for fusion)
+            for r in results:
+                r["modality_type"] = modality
+
             modality_results[modality] = results
 
         # Apply fusion
@@ -322,7 +367,8 @@ class VideoSearchClient:
         query: str,
         limit: int = 50,
         video_id: Optional[str] = None,
-        temperature: float = None
+        temperature: float = None,
+        use_multi_index: bool = False
     ) -> dict:
         """
         Search with dynamic intent-based routing (Section 4.3 of whitepaper).
@@ -334,6 +380,7 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             temperature: Softmax temperature (higher = more uniform weights)
+            use_multi_index: If True, query separate collections per modality
 
         Returns:
             Dict with 'results', 'weights', and 'similarities'
@@ -358,9 +405,15 @@ class VideoSearchClient:
         modality_results = {}
 
         for modality in modalities:
-            filter_doc = {"modality_type": modality}
-            if video_id:
-                filter_doc["video_id"] = video_id
+            # Choose collection and filter based on index mode
+            if use_multi_index:
+                collection = self.get_modality_collection(modality)
+                filter_doc = {"video_id": video_id} if video_id else {}
+            else:
+                collection = self.collection
+                filter_doc = {"modality_type": modality}
+                if video_id:
+                    filter_doc["video_id"] = video_id
 
             pipeline = [
                 {
@@ -370,7 +423,7 @@ class VideoSearchClient:
                         "queryVector": query_embedding,
                         "numCandidates": limit * 6,
                         "limit": limit * 2,
-                        "filter": filter_doc
+                        "filter": filter_doc if filter_doc else None
                     }
                 },
                 {
@@ -380,13 +433,21 @@ class VideoSearchClient:
                         "end_time": 1,
                         "s3_uri": 1,
                         "segment_id": 1,
-                        "modality_type": 1,
                         "score": {"$meta": "vectorSearchScore"}
                     }
                 }
             ]
 
-            results = list(self.collection.aggregate(pipeline))
+            # Remove None filter if empty
+            if not filter_doc:
+                del pipeline[0]["$vectorSearch"]["filter"]
+
+            results = list(collection.aggregate(pipeline))
+
+            # Add modality_type back for consistency
+            for r in results:
+                r["modality_type"] = modality
+
             modality_results[modality] = results
 
         # Apply weighted fusion with dynamic weights

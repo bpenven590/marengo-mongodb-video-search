@@ -70,6 +70,7 @@ class SearchRequest(BaseModel):
     video_id: Optional[str] = None
     fusion_method: str = "rrf"  # "rrf", "weighted", or "dynamic"
     temperature: Optional[float] = 10.0  # For dynamic mode
+    use_multi_index: bool = False  # True = separate collections, False = single with filter
 
 
 class SearchResult(BaseModel):
@@ -122,6 +123,18 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/api/index-mode")
+async def get_index_mode():
+    """Check available index modes."""
+    client = get_search_client()
+    has_multi = client.has_multi_index_collections()
+    return {
+        "single_index_available": True,
+        "multi_index_available": has_multi,
+        "default": "single"
+    }
+
+
 @app.post("/api/search")
 async def search(request: SearchRequest) -> list[SearchResult]:
     """
@@ -141,7 +154,8 @@ async def search(request: SearchRequest) -> list[SearchResult]:
         weights=request.weights,
         limit=request.limit,
         video_id=request.video_id,
-        fusion_method=request.fusion_method
+        fusion_method=request.fusion_method,
+        use_multi_index=request.use_multi_index
     )
 
     # Add CloudFront URLs for fast video playback
@@ -196,7 +210,8 @@ async def search_dynamic(request: SearchRequest) -> DynamicSearchResponse:
         query=request.query,
         limit=request.limit,
         video_id=request.video_id,
-        temperature=request.temperature
+        temperature=request.temperature,
+        use_multi_index=request.use_multi_index
     )
 
     results = response["results"]

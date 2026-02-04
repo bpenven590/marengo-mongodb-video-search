@@ -24,6 +24,13 @@ class MongoDBEmbeddingClient:
     # Single collection for all modalities
     COLLECTION_NAME = "video_embeddings"
 
+    # Modality-specific collections for multi-index mode
+    MODALITY_COLLECTIONS = {
+        "visual": "visual_embeddings",
+        "audio": "audio_embeddings",
+        "transcription": "transcription_embeddings"
+    }
+
     # Vector index name
     VECTOR_INDEX_NAME = "video_embeddings_vector_index"
 
@@ -65,10 +72,15 @@ class MongoDBEmbeddingClient:
         s3_uri: str,
         start_time: float,
         end_time: float,
-        embeddings: dict
+        embeddings: dict,
+        dual_write: bool = True
     ) -> dict:
         """
-        Store embeddings for a video segment (all modalities in single collection).
+        Store embeddings for a video segment (all modalities).
+
+        Supports dual-write mode: writes to both the main collection (video_embeddings)
+        and modality-specific collections (visual_embeddings, audio_embeddings, etc.)
+        for multi-index search support.
 
         Args:
             video_id: Unique identifier for the video
@@ -77,6 +89,7 @@ class MongoDBEmbeddingClient:
             start_time: Segment start time in seconds
             end_time: Segment end time in seconds
             embeddings: Dict containing 'visual', 'audio', and/or 'transcription' embeddings
+            dual_write: If True, also write to modality-specific collections
 
         Returns:
             Dictionary with inserted IDs for each modality
@@ -103,13 +116,30 @@ class MongoDBEmbeddingClient:
                 }
                 documents_to_insert.append((modality, doc))
 
-        # Bulk insert all modality documents
+        # Bulk insert all modality documents into main collection
         if documents_to_insert:
             docs = [doc for _, doc in documents_to_insert]
             result = self.collection.insert_many(docs)
 
             for i, (modality, _) in enumerate(documents_to_insert):
                 inserted_ids[modality] = str(result.inserted_ids[i])
+
+            # Dual-write to modality-specific collections
+            if dual_write:
+                for modality, doc in documents_to_insert:
+                    # Create a copy without modality_type (implicit in collection name)
+                    multi_doc = {
+                        "video_id": doc["video_id"],
+                        "segment_id": doc["segment_id"],
+                        "s3_uri": doc["s3_uri"],
+                        "start_time": doc["start_time"],
+                        "end_time": doc["end_time"],
+                        "created_at": doc["created_at"],
+                        "embedding": doc["embedding"]
+                    }
+                    collection_name = self.MODALITY_COLLECTIONS.get(modality)
+                    if collection_name:
+                        self.db[collection_name].insert_one(multi_doc)
 
         return inserted_ids
 

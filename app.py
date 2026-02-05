@@ -275,6 +275,10 @@ async def search_dynamic(request: SearchRequest):
             decomposed_queries=decomposed_queries
         )
 
+        # Debug logging for weights
+        print(f"Dynamic search weights: {response.get('weights', {})}")
+        print(f"Dynamic search similarities: {response.get('similarities', {})}")
+
         results = response["results"]
         query_embedding = response.get("query_embedding", [])
 

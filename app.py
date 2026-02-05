@@ -181,13 +181,7 @@ async def search(request: SearchRequest):
         key = parsed.path.lstrip("/")
 
         # Use proxy folder for faster video delivery (480p, ~90MB vs ~1.5GB)
-        # Handle both Ready/ and direct paths
-        if "WBD_project/Videos/Ready/" in key:
-            proxy_key = key.replace("WBD_project/Videos/Ready/", "WBD_project/Videos/proxy/")
-        elif "WBD_project/Videos/proxy/" in key:
-            proxy_key = key  # Already in proxy
-        else:
-            proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
+        proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
         result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
 
         # Thumbnail URL (we'll generate these separately)

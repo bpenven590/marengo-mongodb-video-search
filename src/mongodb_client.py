@@ -81,10 +81,7 @@ class MongoDBEmbeddingClient:
         dual_write: bool = False
     ) -> dict:
         """
-        Store embeddings for a video segment in unified-embeddings collection ONLY.
-
-        MongoDB uses single-index mode with unified-embeddings collection.
-        Modality filtering is done via the modality_type field.
+        Store embeddings for a video segment.
 
         Args:
             video_id: Unique identifier for the video
@@ -93,7 +90,8 @@ class MongoDBEmbeddingClient:
             start_time: Segment start time in seconds
             end_time: Segment end time in seconds
             embeddings: Dict containing 'visual', 'audio', and/or 'transcription' embeddings
-            dual_write: Ignored for MongoDB (kept for API compatibility)
+            dual_write: If True, write to both unified-embeddings AND modality-specific collections
+                       If False, write to unified-embeddings only (single-index mode)
 
         Returns:
             Dictionary with inserted IDs for each modality
@@ -120,13 +118,27 @@ class MongoDBEmbeddingClient:
                 }
                 documents_to_insert.append((modality, doc))
 
-        # Insert into unified-embeddings collection ONLY
+        # Always insert into unified-embeddings collection
         if documents_to_insert:
             docs = [doc for _, doc in documents_to_insert]
             result = self.collection.insert_many(docs)
 
             for i, (modality, _) in enumerate(documents_to_insert):
                 inserted_ids[modality] = str(result.inserted_ids[i])
+
+        # If dual_write is enabled, also write to modality-specific collections
+        if dual_write and documents_to_insert:
+            for modality, doc in documents_to_insert:
+                # Get modality-specific collection
+                collection_name = self.MODALITY_COLLECTIONS[modality]
+                collection = self.db[collection_name]
+
+                # Create document without modality_type field (not needed in modality-specific collection)
+                modality_doc = {k: v for k, v in doc.items() if k != 'modality_type'}
+
+                # Insert into modality-specific collection
+                result = collection.insert_one(modality_doc)
+                inserted_ids[f"{modality}_multi"] = str(result.inserted_id)
 
         return inserted_ids
 

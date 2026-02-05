@@ -172,9 +172,11 @@ def lambda_handler(event: dict, context) -> dict:
         for segment in segments:
             segment["s3_uri"] = proxy_s3_uri
 
+        # Store in both unified and modality-specific collections (dual-write mode)
         storage_result = mongodb_client.store_all_segments(
             video_id=video_id,
-            segments=segments
+            segments=segments,
+            dual_write=True
         )
 
         logger.info(f"MongoDB storage result: {json.dumps(storage_result)}")

@@ -1,41 +1,14 @@
 # Multi-Vector Video Search Pipeline
 
-A production-grade video semantic search pipeline implementing the [TwelveLabs Multi-Vector Video Search Guidance](./A%20Guidance%20on%20Multi-Vector%20Video%20Search%20with%20TwelveLabs%20Marengo.pdf). Built with AWS Bedrock Marengo 3.0, featuring dual vector storage backends: **MongoDB Atlas** (single-index) and **Amazon S3 Vectors** (multi-index).
-
-## Live Demo
-
-**Search UI:** https://nyfwaxmgni.us-east-1.awsapprunner.com
+A production-grade video semantic search pipeline built with AWS Bedrock Marengo 3.0, featuring dual vector storage backends: **MongoDB Atlas** and **Amazon S3 Vectors**.
 
 ---
 
-## ⚡ Recent Optimizations (2026-02-05)
+## 🎯 Multi-Vector Search Architecture
 
-### Embedding Cache
-**Query embedding results are now cached** to avoid redundant Bedrock API calls when switching between fusion methods, backends, or index modes with the same query.
+This system uses a **multi-vector retrieval architecture** where each video segment stores **three separate embedding vectors** (visual, audio, transcription) instead of one combined embedding.
 
-**Before:**
-- Every search = new Bedrock API call (~$0.01-0.02)
-- Switch fusion mode = another API call (wasteful!)
-- Switch backend = another API call (wasteful!)
-
-**After:**
-- First search = API call + cache result
-- Subsequent searches with same query = instant (cache hit!)
-- **Savings:** ~$0.01-0.04 per repeated search
-- **Latency improvement:** 200-500ms faster response
-
-### Error Handling Improvements
-1. **Transient Bedrock API errors** now automatically retry with exponential backoff (up to 5 attempts)
-2. **Empty dynamic weight calculation** edge case fixed (no more 500 errors)
-3. **Weighted fusion normalization** bug fixed - single-modality searches now properly normalized (4% → 77% confidence improvement!)
-
----
-
-## 🎯 Multi-Vector Search Approaches
-
-### Approach: Multi-Vector Retrieval (Section 3)
-
-**Implementation:** Three separate embedding vectors per video segment, combined at query time.
+**Why separate embeddings?** This allows you to adjust the importance of each modality at search time without re-indexing. You can search the same data with different strategies depending on your query.
 
 **Storage Architecture:**
 ```
@@ -53,19 +26,15 @@ Video Segment → Three 512d Embeddings:
 - ✅ Foundation for adaptive architectures
 
 **Drawbacks:**
-- ❌ 3x storage footprint vs fused embeddings
-- ❌ 3 vector searches instead of 1
-- ❌ More complex infrastructure (3 indices)
-
-**When to Use:**
-- Production deployments requiring transparency
-- Mixed query intent across modalities
-- State-of-the-art semantic search
-- Modality-specific tuning required
+- ❌ 3x storage footprint vs single fused embedding
+- ❌ 3 vector searches instead of 1 (multi-index mode)
+- ❌ More complex infrastructure
 
 ---
 
 ## 🔀 Fusion Methods
+
+Three methods for combining multi-vector search results:
 
 ### 1. Reciprocal Rank Fusion (RRF)
 
@@ -148,7 +117,7 @@ results = client.search(
 
 ---
 
-### 3. Intent-Based Dynamic Routing (Section 4.3)
+### 3. Intent-Based Dynamic Routing
 
 **Implementation:** Uses embedding similarity to anchor prompts to automatically compute weights.
 
@@ -211,7 +180,7 @@ print(f"Anchor similarities: {response['similarities']}")
 
 ---
 
-## 🧠 LLM Query Decomposition (Section 3.2.2)
+## 🧠 LLM Query Decomposition
 
 **Purpose:** Decompose complex natural language queries into modality-specific sub-queries for enhanced precision.
 
@@ -280,7 +249,7 @@ results = client.search(
 
 ## ⚖️ Modality Weight Configurations
 
-### 1. Fixed Weights (Section 4.1)
+### 1. Fixed Weights
 
 **Method:** Manually set or statistically optimized weights applied to all queries.
 
@@ -360,11 +329,11 @@ print(optimal_weights)
 
 ---
 
-### 2. Dynamic Routing with Anchors (Section 4.3)
+### 2. Dynamic Routing with Anchors
 
 **Method:** Automatically compute weights per query using anchor similarity.
 
-See [Intent-Based Dynamic Routing](#3-intent-based-dynamic-routing-section-43) above for detailed explanation.
+See [Intent-Based Dynamic Routing](#3-intent-based-dynamic-routing) above for detailed explanation.
 
 **Query-Specific Weight Examples:**
 
@@ -418,24 +387,29 @@ for result in response['results']:
                         └─────────┬────────┘
                                   │
          ┌────────────────────────┴────────────────────────┐
+         │                       DUAL-WRITE                │
          │                                                 │
          ▼                                                 ▼
 ┌─────────────────────────┐               ┌─────────────────────────────┐
 │   MongoDB Atlas         │               │   Amazon S3 Vectors         │
-│   (Single Index Mode)   │               │   (Multi-Index Mode)        │
+│   (Dual Mode)           │               │   (Multi-Index Only)        │
 │                         │               │                             │
 │ ┌─────────────────────┐ │               │ ┌─────────────────────────┐ │
-│ │  video_embeddings   │ │               │ │  visual-embeddings      │ │
-│ │  (single collection)│ │               │ │  (separate index)       │ │
-│ │                     │ │               │ ├─────────────────────────┤ │
-│ │  modality_type:     │ │               │ │  audio-embeddings       │ │
-│ │  - visual           │ │               │ │  (separate index)       │ │
-│ │  - audio            │ │               │ ├─────────────────────────┤ │
-│ │  - transcription    │ │               │ │  transcription-embs     │ │
-│ │                     │ │               │ │  (separate index)       │ │
-│ │  HNSW Vector Index  │ │               │ └─────────────────────────┘ │
-│ │  + Filter Fields    │ │               │  Bucket: brice-video-       │
-│ └─────────────────────┘ │               │  search-multimodal          │
+│ │ unified-embeddings  │ │               │ │  visual-embeddings      │ │
+│ │ (single-index mode) │ │               │ │                         │ │
+│ │  + modality_type    │ │               │ ├─────────────────────────┤ │
+│ └─────────────────────┘ │               │ │  audio-embeddings       │ │
+│                         │               │ │                         │ │
+│ ┌─────────────────────┐ │               │ ├─────────────────────────┤ │
+│ │ visual_embeddings   │ │               │ │  transcription-embs     │ │
+│ │ (multi-index mode)  │ │               │ │                         │ │
+│ ├─────────────────────┤ │               │ └─────────────────────────┘ │
+│ │ audio_embeddings    │ │               │  Bucket: brice-video-       │
+│ ├─────────────────────┤ │               │  search-multimodal          │
+│ │ transcription_embs  │ │               │                             │
+│ └─────────────────────┘ │               │  Score Fix (2026-02-05):    │
+│                         │               │  score = 1 - (distance/2)   │
+│  All with HNSW Indexes │               │  (squared Euclidean)        │
 └────────────┬────────────┘               └─────────────┬───────────────┘
              │                                          │
              └──────────────────┬───────────────────────┘
@@ -460,6 +434,14 @@ for result in response['results']:
                         │  Query Modes:    │
                         │  - LLM Decomp    │
                         │  - Single Query  │
+                        │                  │
+                        │  Backend Toggle: │
+                        │  - MongoDB       │
+                        │  - S3 Vectors    │
+                        │                  │
+                        │  Index Mode:     │
+                        │  - Single-Index  │
+                        │  - Multi-Index   │
                         └──────────────────┘
 ```
 
@@ -487,10 +469,20 @@ The web interface provides comprehensive search capabilities:
 - **Modality Weights** - Real-time sliders for visual/audio/transcription weights
 - **Temperature Control** - Adjust softmax temperature for dynamic routing (1-50)
 
-### Backend Toggle
+### Storage Backend Selection
 
-- **MongoDB (Single Index)** - One collection with modality filter (default)
-- **S3 Vectors (Multi-Index)** - Separate index per modality
+**MongoDB Atlas:**
+- Single-Index mode: Uses `unified-embeddings` collection with `modality_type` filter
+- Multi-Index mode: Uses separate collections per modality (requires M10+ cluster)
+- Toggle between modes in UI (requires migration + indexes)
+
+**Amazon S3 Vectors:**
+- Multi-Index mode only: Separate indexes per modality
+- Single-index toggle disabled (unified index removed for performance)
+
+**Score Calculation:**
+- MongoDB: Native cosine similarity (vectorSearchScore)
+- S3 Vectors: `1 - (squared_euclidean_distance / 2)` for normalized vectors
 
 ### Result Card Layout
 
@@ -523,24 +515,164 @@ Each search result displays comprehensive match information:
 
 ```
 multi-modal-video-search/
-├── app.py                        # FastAPI web application (search API)
+├── app.py                           # FastAPI web application (search API)
 ├── src/
-│   ├── lambda_function.py        # Lambda handler for video processing
-│   ├── bedrock_client.py         # Bedrock Marengo client + LLM decomposition
-│   ├── mongodb_client.py         # MongoDB embedding storage
-│   ├── s3_vectors_client.py      # S3 Vectors embedding storage & search
-│   ├── search_client.py          # Multi-vector search with all fusion methods
-│   └── query_fusion.py           # Legacy query fusion script
+│   ├── lambda_function.py           # Lambda handler for video processing
+│   ├── bedrock_client.py            # Bedrock Marengo client + LLM decomposition
+│   ├── mongodb_client.py            # MongoDB embedding storage (dual-write support)
+│   ├── s3_vectors_client.py         # S3 Vectors embedding storage & search
+│   ├── search_client.py             # Multi-vector search with all fusion methods
+│   └── query_fusion.py              # Legacy query fusion script
 ├── static/
-│   └── index.html                # Search UI frontend
+│   └── index.html                   # Search UI frontend (responsive design)
 ├── scripts/
-│   ├── deploy.sh                 # AWS CLI deployment script
-│   ├── mongodb_setup.md          # MongoDB Atlas setup guide
-│   └── migrate_to_s3_vectors.py  # Migration script: MongoDB → S3 Vectors
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment variables template
-└── README.md                     # This file
+│   ├── deploy.sh                    # AWS CLI deployment script
+│   ├── mongodb_setup.md             # MongoDB Atlas setup guide
+│   └── migrate_to_s3_vectors.py     # Migration: MongoDB → S3 Vectors
+├── migrate_mongodb_multi_index.py   # Migration: single-index → multi-index
+├── debug_score_differences.py       # Diagnostic: Compare backend scores
+├── inspect_s3_raw_distance.py       # Diagnostic: Inspect S3 Vectors raw distances
+├── test_dynamic_weights.py          # Diagnostic: Test dynamic weight calculation
+├── test_unified_search.py           # Diagnostic: Test unified index search
+├── delete_unified_index.py          # Utility: Delete S3 Vectors unified index
+├── check_s3vectors_unified.py       # Utility: Check unified index contents
+├── requirements.txt                 # Python dependencies
+├── .env.example                     # Environment variables template
+└── README.md                        # This file
 ```
+
+---
+
+## 🗄️ MongoDB Multi-Index Setup
+
+MongoDB now supports **both single-index and multi-index modes** for A/B testing performance. New videos automatically write to all collections (dual-write mode).
+
+### Prerequisites
+
+- **MongoDB Atlas M10+ cluster** (Flex supports max 3 indexes, you need 4)
+- Existing `unified-embeddings` collection with data
+- ~3x available storage space
+
+### Step 1: Run Migration Script
+
+```bash
+# Set MongoDB connection string
+export MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/video_search"
+
+# Run migration
+python migrate_mongodb_multi_index.py
+```
+
+This copies documents from `unified-embeddings` into:
+- `visual_embeddings`
+- `audio_embeddings`
+- `transcription_embeddings`
+
+**Note:** The unified collection remains unchanged (safe migration).
+
+### Step 2: Create Vector Search Indexes
+
+In MongoDB Atlas UI, create 3 new vector search indexes:
+
+**For visual_embeddings:**
+```json
+{
+  "name": "visual_embeddings_vector_index",
+  "type": "vectorSearch",
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 512,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "video_id"
+    }
+  ]
+}
+```
+
+**For audio_embeddings:**
+```json
+{
+  "name": "audio_embeddings_vector_index",
+  "type": "vectorSearch",
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 512,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "video_id"
+    }
+  ]
+}
+```
+
+**For transcription_embeddings:**
+```json
+{
+  "name": "transcription_embeddings_vector_index",
+  "type": "vectorSearch",
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 512,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "video_id"
+    }
+  ]
+}
+```
+
+### Step 3: Wait for Index Build
+
+Vector search indexes can take several minutes to build. Check status in Atlas UI under **Search → Indexes**.
+
+### Step 4: Test Multi-Index Mode
+
+In the web UI:
+1. Select "MongoDB" backend
+2. Toggle "Multi-Index" mode ON
+3. Run a search query
+4. Compare results with Single-Index mode
+
+### Comparison: Single-Index vs Multi-Index
+
+| Aspect | Single-Index | Multi-Index |
+|--------|-------------|-------------|
+| **Collections** | 1 (unified-embeddings) | 3 (modality-specific) |
+| **Vector Searches** | 1 with filters | 3 separate searches |
+| **Storage** | 1x | 3x |
+| **Setup Complexity** | Simple (1 index) | Complex (3 indexes) |
+| **Query Performance** | Filter overhead | Parallel searches |
+| **Best For** | General use, lower cost | Performance testing, specific workloads |
+
+### Troubleshooting
+
+**"Index not found" error:**
+- Verify index names match exactly (case-sensitive)
+- Check index status in Atlas UI (must be "Active")
+- Wait for index build to complete (can take 5-15 minutes)
+
+**Low storage space warning:**
+- Multi-index mode requires ~3x storage vs single-index
+- Monitor Atlas storage metrics
+- Consider upgrading cluster tier if needed
+
+**Performance not improving:**
+- MongoDB may auto-optimize single-index with filters
+- Multi-index mode benefits vary by query patterns
+- Use CloudWatch metrics to compare latencies
 
 ---
 
@@ -567,11 +699,15 @@ cp .env.example .env
 
 Follow the detailed guide in [scripts/mongodb_setup.md](scripts/mongodb_setup.md):
 
-1. Create a cluster (free tier M0 works)
+1. Create a cluster:
+   - **For single-index mode only:** M0 Free tier works
+   - **For both single + multi-index:** M10+ required (supports 4 vector indexes)
 2. Create database user and get connection string
-3. Create the `video_embeddings` collection with vector index
+3. Create the `unified-embeddings` collection with vector index
 4. Whitelist IPs (or use 0.0.0.0/0 for testing)
 5. Update `MONGODB_URI` in your `.env` file
+
+**Optional:** Setup multi-index mode (see [MongoDB Multi-Index Setup](#🗄️-mongodb-multi-index-setup) section)
 
 ### 3. Deploy Lambda Function
 
@@ -643,12 +779,21 @@ curl "http://localhost:8000/api/search" \
 
 ## 📊 MongoDB Schema
 
-### Single Collection: `video_embeddings`
+MongoDB now supports **dual storage mode** - both single-index and multi-index simultaneously.
 
-All embeddings stored in one collection with `modality_type` field for filtering.
+### Collections
+
+**Single-Index Mode:**
+- `unified-embeddings` - All modalities in one collection with `modality_type` field
+
+**Multi-Index Mode:**
+- `visual_embeddings` - Visual modality only
+- `audio_embeddings` - Audio modality only
+- `transcription_embeddings` - Transcription modality only
 
 ### Document Schema
 
+**unified-embeddings collection:**
 ```json
 {
   "_id": "ObjectId",
@@ -663,17 +808,61 @@ All embeddings stored in one collection with `modality_type` field for filtering
 }
 ```
 
-### Vector Index Definition
-
+**Modality-specific collections (visual_embeddings, audio_embeddings, transcription_embeddings):**
 ```json
 {
-  "fields": [
-    { "type": "vector", "path": "embedding", "numDimensions": 512, "similarity": "cosine" },
-    { "type": "filter", "path": "modality_type" },
-    { "type": "filter", "path": "video_id" }
-  ]
+  "_id": "ObjectId",
+  "video_id": "string - unique video identifier",
+  "segment_id": "int - segment index within video",
+  "s3_uri": "string - s3://bucket/key",
+  "embedding": "[float] - 512-dimensional vector",
+  "start_time": "float - segment start (seconds)",
+  "end_time": "float - segment end (seconds)",
+  "created_at": "datetime - document creation time"
 }
 ```
+*Note: No `modality_type` field needed - collection name implies modality*
+
+### Vector Index Definitions
+
+**unified-embeddings:**
+- **Index name:** `unified_embeddings_vector_index`
+- **Fields:**
+  - `embedding` - vector, 512 dimensions, cosine similarity
+  - `modality_type` - filter field
+  - `video_id` - filter field
+
+**visual_embeddings:**
+- **Index name:** `visual_embeddings_vector_index`
+- **Fields:**
+  - `embedding` - vector, 512 dimensions, cosine similarity
+  - `video_id` - filter field
+
+**audio_embeddings:**
+- **Index name:** `audio_embeddings_vector_index`
+- **Fields:**
+  - `embedding` - vector, 512 dimensions, cosine similarity
+  - `video_id` - filter field
+
+**transcription_embeddings:**
+- **Index name:** `transcription_embeddings_vector_index`
+- **Fields:**
+  - `embedding` - vector, 512 dimensions, cosine similarity
+  - `video_id` - filter field
+
+### Migrating to Multi-Index Mode
+
+Run the migration script to copy data from `unified-embeddings` into modality-specific collections:
+
+```bash
+python migrate_mongodb_multi_index.py
+```
+
+Then create the 3 vector search indexes in MongoDB Atlas UI (see script output for details).
+
+**Requirements:**
+- MongoDB Atlas M10+ cluster (Flex tier supports max 3 indexes, you need 4 total)
+- ~3x storage space (data is duplicated across collections)
 
 ---
 
@@ -765,23 +954,6 @@ print(decomposed)
 
 ---
 
-## 💰 Cost Estimation
-
-Based on Marengo 3.0 pricing:
-
-| Component | Price | Notes |
-|-----------|-------|-------|
-| Video embedding | $0.0007/second | For video processing |
-| Text query embedding | Included | No additional cost |
-| LLM decomposition (optional) | ~$0.0001/query | Claude 3 Haiku (500 tokens) |
-
-**Example Costs:**
-- **1 hour video processing:** 3,600 sec × $0.0007 = **$2.52**
-- **1,000 searches (no decomposition):** **$0** (text embeddings included)
-- **1,000 searches (with decomposition):** ~**$0.10** (LLM calls)
-
----
-
 ## 🔧 Environment Variables
 
 | Variable | Default | Description |
@@ -799,6 +971,27 @@ Based on Marengo 3.0 pricing:
 
 ## 🐛 Troubleshooting
 
+### S3 Vectors Scores Much Lower Than MongoDB (FIXED)
+
+**Issue:** S3 Vectors returned scores 69-72% lower than MongoDB for identical queries.
+
+**Root Cause:** S3 Vectors API returns **squared Euclidean distance** for normalized vectors, not cosine distance.
+
+**Solution (2026-02-05):**
+```python
+# Old (WRONG):
+score = 1 - distance
+
+# New (CORRECT):
+score = 1 - (distance / 2)
+```
+
+**Why:** For normalized vectors: `squared_euclidean = 2 * (1 - cosine_similarity)`
+
+**Verification:** Scores now match MongoDB within 0.2% floating-point precision.
+
+**File:** [src/s3_vectors_client.py:337](src/s3_vectors_client.py#L337)
+
 ### 500 Internal Server Errors
 
 **Fixed in latest version (2026-02-05):**
@@ -811,11 +1004,17 @@ If you still see errors:
 2. Verify AWS Bedrock permissions: `bedrock:InvokeModel`
 3. Ensure MongoDB connection string is valid
 
-### Low Confidence Scores
+### Confidence Scores Not Representative
 
 **Fixed in latest version (2026-02-05):**
-- ✅ Single-modality searches now properly normalized (4% → 77% improvement!)
-- ✅ Fusion scores match raw scores for single-modality searches
+- ✅ Confidence now shows `max(modality_scores)` instead of weighted fusion
+- ✅ Example: 77% transcription match now displays as 77% confidence (not 20%)
+- ✅ Fusion score still used for ranking (unchanged)
+
+**Why the change:**
+- Weighted fusion can dilute high-scoring modalities (e.g., transcription weight = 0.05)
+- Users see more honest representation of match quality
+- Ranking algorithm unchanged - only display metric affected
 
 For best results:
 - Use **Dynamic mode** for mixed queries (visual + audio + transcription)
@@ -853,18 +1052,30 @@ For best results:
 2. Check connection string format
 3. For testing, use 0.0.0.0/0 in Atlas Network Access
 
----
+### Diagnostic Scripts
 
-## 📚 References
+The project includes several debugging utilities:
 
-- [TwelveLabs Multi-Vector Guidance](./A%20Guidance%20on%20Multi-Vector%20Video%20Search%20with%20TwelveLabs%20Marengo.pdf) - Complete whitepaper
-- [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/)
-- [Amazon S3 Vectors Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors.html)
-- [AWS Bedrock Marengo](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-marengo.html)
-- [Claude 3 Models](https://docs.anthropic.com/claude/docs/models-overview)
+**debug_score_differences.py** - Compare MongoDB vs S3 Vectors scores
+```bash
+export MONGODB_URI="your_connection_string"
+python debug_score_differences.py
+```
 
----
+**inspect_s3_raw_distance.py** - Inspect raw S3 Vectors API distance values
+```bash
+python inspect_s3_raw_distance.py
+```
 
-## 📝 License
+**test_dynamic_weights.py** - Debug dynamic weight calculation
+```bash
+export MONGODB_URI="your_connection_string"
+python test_dynamic_weights.py
+```
 
-Internal use only. All rights reserved.
+**migrate_mongodb_multi_index.py** - Migrate to multi-index mode
+```bash
+export MONGODB_URI="your_connection_string"
+python migrate_mongodb_multi_index.py
+```
+

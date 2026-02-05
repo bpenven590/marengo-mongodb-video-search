@@ -683,6 +683,60 @@
             background: rgba(107, 114, 128, 0.1);
             color: #9ca3af;
         }
+
+        /* Single Modality Dropdown */
+        .single-dropdown {
+            position: relative;
+        }
+
+        .dropdown-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: #1e1e1e;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            min-width: 120px;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .dropdown-menu.active {
+            display: block;
+        }
+
+        .dropdown-item {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 1rem;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            font-size: 0.875rem;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .dropdown-item:hover {
+            background: #2d2d2d;
+            color: #e5e7eb;
+        }
+
+        .dropdown-item:first-child {
+            border-radius: 6px 6px 0 0;
+        }
+
+        .dropdown-item:last-child {
+            border-radius: 0 0 6px 6px;
+        }
     </style>
 </head>
 <body>
@@ -707,15 +761,23 @@
         </div>
 
         <div class="modality-selector">
-            <span class="fusion-label">Fusion:</span>
+            <button class="modality-btn active" data-mode="fused" title="Simple fusion with fixed default weights (visual=0.8, audio=0.1, transcription=0.05)">Fused</button>
             <button class="modality-btn" data-mode="rrf" title="Multi-vector fusion using Reciprocal Rank Fusion">RRF</button>
-            <button class="modality-btn active" data-mode="weighted" title="Multi-vector fusion with weighted score combination">Weighted</button>
+            <button class="modality-btn" data-mode="weighted" title="Multi-vector fusion with adjustable weighted score combination">Weighted</button>
             <button class="modality-btn" data-mode="dynamic" title="Multi-vector fusion with dynamic intent routing">Dynamic</button>
-            <span style="color: #3d3d3d; margin: 0 0.25rem;">|</span>
-            <span class="single-label">Single:</span>
-            <button class="modality-btn" data-mode="visual" title="Search visual content only">Visual</button>
-            <button class="modality-btn" data-mode="audio" title="Search audio/sound only">Audio</button>
-            <button class="modality-btn" data-mode="transcription" title="Search speech/transcription only">Speech</button>
+            <div class="single-dropdown">
+                <button class="modality-btn dropdown-btn" id="singleDropdownBtn" title="Single modality search">
+                    <span id="singleModeLabel">SINGLE</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="margin-left: 4px;">
+                        <path d="M2 4l4 4 4-4z"/>
+                    </svg>
+                </button>
+                <div class="dropdown-menu" id="singleDropdownMenu">
+                    <button class="dropdown-item" data-mode="visual" title="Search visual content only">Visual</button>
+                    <button class="dropdown-item" data-mode="audio" title="Search audio/sound only">Audio</button>
+                    <button class="dropdown-item" data-mode="transcription" title="Search speech/transcription only">Speech</button>
+                </div>
+            </div>
 
             <div class="index-toggle">
                 <span class="index-toggle-label">Backend:</span>
@@ -729,8 +791,35 @@
     </header>
 
     <main>
+        <!-- Fused mode: fixed weights info -->
+        <div class="weights-panel active" id="fusedPanel">
+            <div class="weights-panel-title">Fused Embeddings (Fixed Weights)</div>
+            <div class="weight-row">
+                <span class="weight-label">Visual</span>
+                <div style="flex: 1; height: 6px; background: #3d3d3d; border-radius: 3px; overflow: hidden;">
+                    <div style="width: 80%; height: 100%; background: #60a5fa;"></div>
+                </div>
+                <span class="weight-value">0.80</span>
+            </div>
+            <div class="weight-row">
+                <span class="weight-label">Audio</span>
+                <div style="flex: 1; height: 6px; background: #3d3d3d; border-radius: 3px; overflow: hidden;">
+                    <div style="width: 10%; height: 100%; background: #34d399;"></div>
+                </div>
+                <span class="weight-value">0.10</span>
+            </div>
+            <div class="weight-row">
+                <span class="weight-label">Transcription</span>
+                <div style="flex: 1; height: 6px; background: #3d3d3d; border-radius: 3px; overflow: hidden;">
+                    <div style="width: 5%; height: 100%; background: #fbbf24;"></div>
+                </div>
+                <span class="weight-value">0.05</span>
+            </div>
+            <div class="mode-description">Fused Embeddings (Section 2.2): Fixed weights optimized for visual-heavy queries. Simple weighted fusion at query time.</div>
+        </div>
+
         <!-- Weighted mode: manual sliders -->
-        <div class="weights-panel active" id="weightsPanel">
+        <div class="weights-panel" id="weightsPanel">
             <div class="weights-panel-title">Adjust Modality Weights</div>
             <div class="weight-row">
                 <span class="weight-label">Visual</span>
@@ -747,7 +836,7 @@
                 <input type="range" class="weight-slider" id="transcriptionWeight" min="0" max="100" value="5">
                 <span class="weight-value" id="transcriptionValue">0.05</span>
             </div>
-            <div class="mode-description">Weighted Score Fusion: score = Σ(weight × similarity)</div>
+            <div class="mode-description">Weighted Score Fusion (Section 3.2.3, Eq. 3): score(s) = Σ w_m · sim(Q_m, E_m(s)) — adjustable weights per modality</div>
         </div>
 
         <!-- Dynamic mode: auto-computed weights display -->
@@ -774,13 +863,13 @@
                 </div>
                 <span class="dynamic-weight-value transcription" id="dynamicTranscriptionValue">-</span>
             </div>
-            <div class="mode-description">Intent-Based Dynamic Routing: weights computed from query similarity to modality anchors</div>
+            <div class="mode-description">Intent-Based Dynamic Routing (Section 4.3, Eq. 4): (w_v, w_a, w_t) = softmax(α · sim(E_query, anchors)) where α=10 — auto-computes weights based on query intent</div>
         </div>
 
         <!-- RRF mode info -->
         <div class="weights-panel" id="rrfPanel">
             <div class="weights-panel-title">Reciprocal Rank Fusion (RRF)</div>
-            <div class="mode-description">RRF formula: score(d) = Σ 1/(60 + rank_m) — rank-based fusion, robust to score distribution differences</div>
+            <div class="mode-description">RRF (Section 3.2.3, Eq. 2): score(s) = Σ w_m/(k + rank_m(s)) where k=60 — rank-based fusion, robust to score calibration differences across modalities</div>
         </div>
 
         <div class="results-header">
@@ -817,7 +906,7 @@
 
     <script>
         // State
-        let currentMode = 'weighted';
+        let currentMode = 'fused';
         let currentResults = [];
         let preloadedVideoUrl = null;
         let lastDynamicWeights = null;
@@ -828,6 +917,7 @@
         const resultsContainer = document.getElementById('resultsContainer');
         const queryDisplay = document.getElementById('queryDisplay');
         const resultsCount = document.getElementById('resultsCount');
+        const fusedPanel = document.getElementById('fusedPanel');
         const weightsPanel = document.getElementById('weightsPanel');
         const dynamicWeightsPanel = document.getElementById('dynamicWeightsPanel');
         const rrfPanel = document.getElementById('rrfPanel');
@@ -837,11 +927,17 @@
         const modalInfo = document.getElementById('modalInfo');
         const modalClose = document.getElementById('modalClose');
 
+        // Dropdown elements
+        const singleDropdownBtn = document.getElementById('singleDropdownBtn');
+        const singleDropdownMenu = document.getElementById('singleDropdownMenu');
+        const singleModeLabel = document.getElementById('singleModeLabel');
+
         // Multi-vector modes that use all modalities
-        const MULTI_VECTOR_MODES = ['rrf', 'weighted', 'dynamic'];
+        const MULTI_VECTOR_MODES = ['fused', 'rrf', 'weighted', 'dynamic'];
 
         // Update panel visibility based on mode
         function updatePanelVisibility() {
+            fusedPanel.classList.toggle('active', currentMode === 'fused');
             weightsPanel.classList.toggle('active', currentMode === 'weighted');
             dynamicWeightsPanel.classList.toggle('active', currentMode === 'dynamic');
             rrfPanel.classList.toggle('active', currentMode === 'rrf');
@@ -864,12 +960,62 @@
             return str.charAt(0).toUpperCase() + str.slice(1);
         }
 
-        // Modality buttons
-        document.querySelectorAll('.modality-btn').forEach(btn => {
+        // Dropdown toggle
+        singleDropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            singleDropdownMenu.classList.toggle('active');
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', () => {
+            singleDropdownMenu.classList.remove('active');
+        });
+
+        // Dropdown items
+        document.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+
+                // Update all buttons to inactive
+                document.querySelectorAll('.modality-btn').forEach(b => b.classList.remove('active'));
+                singleDropdownBtn.classList.add('active');
+
+                // Update mode and label
+                currentMode = item.dataset.mode;
+                const modeLabels = {
+                    'visual': 'Visual',
+                    'audio': 'Audio',
+                    'transcription': 'Speech'
+                };
+                singleModeLabel.textContent = modeLabels[currentMode];
+
+                // Close dropdown
+                singleDropdownMenu.classList.remove('active');
+
+                // Update panel visibility
+                updatePanelVisibility();
+
+                // Re-run search if we have a query
+                if (searchInput.value.trim()) {
+                    performSearch();
+                }
+            });
+        });
+
+        // Main mode buttons (Fused, RRF, Weighted, Dynamic)
+        document.querySelectorAll('.modality-btn:not(.dropdown-btn)').forEach(btn => {
             btn.addEventListener('click', () => {
+                // Only handle if it has a data-mode attribute
+                if (!btn.dataset.mode) return;
+
                 document.querySelectorAll('.modality-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentMode = btn.dataset.mode;
+
+                // Reset SINGLE label when switching to multi-vector modes
+                if (MULTI_VECTOR_MODES.includes(currentMode)) {
+                    singleModeLabel.textContent = 'SINGLE';
+                }
 
                 // Update panel visibility
                 updatePanelVisibility();
@@ -934,7 +1080,7 @@
                     updateDynamicWeightsDisplay(data.computed_weights);
 
                 } else if (MULTI_VECTOR_MODES.includes(currentMode)) {
-                    // RRF or Weighted fusion
+                    // Fused, RRF, or Weighted fusion
                     const request = {
                         query,
                         limit: 20,
@@ -943,7 +1089,7 @@
                     };
 
                     if (currentMode === 'weighted') {
-                        // Get custom weights from sliders
+                        // Weighted mode: Get custom weights from sliders
                         const visualW = document.getElementById('visualWeight').value / 100;
                         const audioW = document.getElementById('audioWeight').value / 100;
                         const transW = document.getElementById('transcriptionWeight').value / 100;
@@ -952,6 +1098,13 @@
                             visual: visualW,
                             audio: audioW,
                             transcription: transW
+                        };
+                    } else if (currentMode === 'fused') {
+                        // Fused mode: Use fixed default weights (Section 2.2 of whitepaper)
+                        request.weights = {
+                            visual: 0.8,
+                            audio: 0.1,
+                            transcription: 0.05
                         };
                     }
 
@@ -1115,6 +1268,7 @@
 
         function getModeLabel(mode) {
             const labels = {
+                'fused': 'Fused Embeddings',
                 'rrf': 'RRF Fusion',
                 'weighted': 'Weighted Fusion',
                 'dynamic': 'Dynamic Routing',

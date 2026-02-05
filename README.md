@@ -1052,30 +1052,3 @@ For best results:
 2. Check connection string format
 3. For testing, use 0.0.0.0/0 in Atlas Network Access
 
-### Diagnostic Scripts
-
-The project includes several debugging utilities:
-
-**debug_score_differences.py** - Compare MongoDB vs S3 Vectors scores
-```bash
-export MONGODB_URI="your_connection_string"
-python debug_score_differences.py
-```
-
-**inspect_s3_raw_distance.py** - Inspect raw S3 Vectors API distance values
-```bash
-python inspect_s3_raw_distance.py
-```
-
-**test_dynamic_weights.py** - Debug dynamic weight calculation
-```bash
-export MONGODB_URI="your_connection_string"
-python test_dynamic_weights.py
-```
-
-**migrate_mongodb_multi_index.py** - Migrate to multi-index mode
-```bash
-export MONGODB_URI="your_connection_string"
-python migrate_mongodb_multi_index.py
-```
-

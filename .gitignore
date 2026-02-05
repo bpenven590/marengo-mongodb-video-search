@@ -37,3 +37,14 @@ dist/
 # Local documentation (not for git)
 WORKFLOW.local.md
 *.local.md
+
+# Debug/test scripts (local development only)
+debug_score_differences.py
+inspect_s3_raw_distance.py
+test_dynamic_weights.py
+test_unified_search.py
+check_s3vectors_unified.py
+delete_unified_index.py
+
+# Lambda deployment artifacts
+lambda-deployment.zip

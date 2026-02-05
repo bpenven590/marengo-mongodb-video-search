@@ -192,7 +192,8 @@ class VideoSearchClient:
         video_id: Optional[str] = None,
         fusion_method: str = "rrf",  # "rrf", "weighted", or "dynamic"
         k_per_modality: int = 20,
-        use_multi_index: bool = False  # True = S3 Vectors, False = MongoDB single-index
+        use_multi_index: bool = False,  # True = S3 Vectors, False = MongoDB single-index
+        return_embeddings: bool = False  # Include 512d embeddings in results
     ) -> list:
         """
         Search for video segments matching a text query.
@@ -206,6 +207,7 @@ class VideoSearchClient:
             fusion_method: "rrf" (Reciprocal Rank Fusion) or "weighted" (score sum)
             use_multi_index: If True, use S3 Vectors (separate indexes per modality)
                            If False, use MongoDB single collection with modality_type filter
+            return_embeddings: If True, include 512d embedding vectors in results
 
         Returns:
             List of ranked results with fusion scores
@@ -248,6 +250,18 @@ class VideoSearchClient:
             if video_id:
                 filter_doc["video_id"] = video_id
 
+            # Build projection fields
+            projection = {
+                "video_id": 1,
+                "start_time": 1,
+                "end_time": 1,
+                "s3_uri": 1,
+                "segment_id": 1,
+                "score": {"$meta": "vectorSearchScore"}
+            }
+            if return_embeddings:
+                projection["embedding"] = 1
+
             pipeline = [
                 {
                     "$vectorSearch": {
@@ -260,14 +274,7 @@ class VideoSearchClient:
                     }
                 },
                 {
-                    "$project": {
-                        "video_id": 1,
-                        "start_time": 1,
-                        "end_time": 1,
-                        "s3_uri": 1,
-                        "segment_id": 1,
-                        "score": {"$meta": "vectorSearchScore"}
-                    }
+                    "$project": projection
                 }
             ]
 
@@ -324,6 +331,9 @@ class VideoSearchClient:
                         "modality_scores": {},
                         "modality_ranks": {}
                     }
+                    # Preserve embedding if present
+                    if "embedding" in doc:
+                        segment_scores[key]["embedding"] = doc["embedding"]
 
                 # RRF contribution: weight / (k + rank)
                 rrf_contribution = weight / (self.RRF_K + rank)
@@ -370,6 +380,9 @@ class VideoSearchClient:
                         "s3_uri": doc["s3_uri"],
                         "modality_scores": {}
                     }
+                    # Preserve embedding if present
+                    if "embedding" in doc:
+                        segment_scores[key]["embedding"] = doc["embedding"]
 
                 segment_scores[key]["modality_scores"][modality] = doc["score"]
 
@@ -396,7 +409,8 @@ class VideoSearchClient:
         limit: int = 50,
         video_id: Optional[str] = None,
         temperature: float = None,
-        use_multi_index: bool = False
+        use_multi_index: bool = False,
+        return_embeddings: bool = False
     ) -> dict:
         """
         Search with dynamic intent-based routing (Section 4.3 of whitepaper).
@@ -409,9 +423,10 @@ class VideoSearchClient:
             video_id: Optional filter by specific video
             temperature: Softmax temperature (higher = more uniform weights)
             use_multi_index: If True, use S3 Vectors (separate indexes per modality)
+            return_embeddings: If True, include 512d embedding vectors in results
 
         Returns:
-            Dict with 'results', 'weights', and 'similarities'
+            Dict with 'results', 'weights', 'similarities', and optionally 'query_embedding'
         """
         if temperature is None:
             temperature = self.SOFTMAX_TEMPERATURE
@@ -441,11 +456,14 @@ class VideoSearchClient:
                 video_id_filter=video_id,
                 fusion_method="weighted"
             )
-            return {
+            response = {
                 "results": results,
                 "weights": weights,
                 "similarities": similarities
             }
+            if return_embeddings:
+                response["query_embedding"] = query_embedding
+            return response
 
         # MongoDB single-index mode
         modality_results = {}
@@ -455,6 +473,18 @@ class VideoSearchClient:
             filter_doc = {"modality_type": modality}
             if video_id:
                 filter_doc["video_id"] = video_id
+
+            # Build projection fields
+            projection = {
+                "video_id": 1,
+                "start_time": 1,
+                "end_time": 1,
+                "s3_uri": 1,
+                "segment_id": 1,
+                "score": {"$meta": "vectorSearchScore"}
+            }
+            if return_embeddings:
+                projection["embedding"] = 1
 
             pipeline = [
                 {
@@ -468,14 +498,7 @@ class VideoSearchClient:
                     }
                 },
                 {
-                    "$project": {
-                        "video_id": 1,
-                        "start_time": 1,
-                        "end_time": 1,
-                        "s3_uri": 1,
-                        "segment_id": 1,
-                        "score": {"$meta": "vectorSearchScore"}
-                    }
+                    "$project": projection
                 }
             ]
 
@@ -490,11 +513,15 @@ class VideoSearchClient:
         # Apply weighted fusion with dynamic weights
         results = self._weighted_fusion(modality_results, weights, limit)
 
-        return {
+        response = {
             "results": results,
             "weights": weights,
             "similarities": similarities
         }
+        if return_embeddings:
+            response["query_embedding"] = query_embedding
+
+        return response
 
     def get_videos(self) -> list:
         """Get list of all indexed videos."""

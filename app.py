@@ -139,7 +139,7 @@ async def get_index_mode():
 
 
 @app.post("/api/search")
-async def search(request: SearchRequest) -> list[SearchResult]:
+async def search(request: SearchRequest):
     """
     Search for video segments.
 
@@ -151,6 +151,10 @@ async def search(request: SearchRequest) -> list[SearchResult]:
     """
     client = get_search_client()
 
+    # Get query embedding for code inspection
+    query_embedding_result = client.bedrock.get_text_query_embedding(request.query)
+    query_embedding = query_embedding_result.get("embedding", [])
+
     results = client.search(
         query=request.query,
         modalities=request.modalities,
@@ -158,7 +162,8 @@ async def search(request: SearchRequest) -> list[SearchResult]:
         limit=request.limit,
         video_id=request.video_id,
         fusion_method=request.fusion_method,
-        use_multi_index=request.use_multi_index
+        use_multi_index=request.use_multi_index,
+        return_embeddings=True  # Request embeddings in results
     )
 
     # Add CloudFront URLs for fast video playback
@@ -174,7 +179,12 @@ async def search(request: SearchRequest) -> list[SearchResult]:
         # Thumbnail URL (we'll generate these separately)
         result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
 
-    return results
+    return {
+        "results": results,
+        "query_embeddings": {
+            "combined": query_embedding  # 512d vector
+        }
+    }
 
 
 @app.get("/api/search")
@@ -195,7 +205,7 @@ async def search_get(
 
 
 @app.post("/api/search/dynamic")
-async def search_dynamic(request: SearchRequest) -> DynamicSearchResponse:
+async def search_dynamic(request: SearchRequest):
     """
     Search with dynamic intent-based routing.
 
@@ -214,10 +224,12 @@ async def search_dynamic(request: SearchRequest) -> DynamicSearchResponse:
         limit=request.limit,
         video_id=request.video_id,
         temperature=request.temperature,
-        use_multi_index=request.use_multi_index
+        use_multi_index=request.use_multi_index,
+        return_embeddings=True
     )
 
     results = response["results"]
+    query_embedding = response.get("query_embedding", [])
 
     # Add CloudFront URLs for fast video playback
     for result in results:
@@ -229,11 +241,14 @@ async def search_dynamic(request: SearchRequest) -> DynamicSearchResponse:
         result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
         result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
 
-    return DynamicSearchResponse(
-        results=results,
-        computed_weights=response["weights"],
-        anchor_similarities=response["similarities"]
-    )
+    return {
+        "results": results,
+        "computed_weights": response["weights"],
+        "anchor_similarities": response["similarities"],
+        "query_embeddings": {
+            "combined": query_embedding
+        }
+    }
 
 
 @app.get("/api/videos")

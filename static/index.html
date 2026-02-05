@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwelveLabs Marengo - Multi-Modal Video Search</title>
+    <link rel="icon" type="image/x-icon" href="/static/images/TL-favicon.ico">
     <style>
         * {
             margin: 0;
@@ -40,6 +41,26 @@
         .logo svg {
             width: 32px;
             height: 32px;
+        }
+
+        /* Partner Logos */
+        .partner-logos {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-left: auto;
+        }
+
+        .partner-logos img {
+            height: 28px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .partner-logos .separator {
+            color: #6b7280;
+            font-size: 1.25rem;
+            font-weight: 300;
         }
 
         /* Search Container */
@@ -632,11 +653,15 @@
         }
 
         .toggle-switch input:checked + .toggle-slider {
-            background-color: #6b7280;
+            background-color: #fb923c;
         }
 
         .toggle-switch input:checked + .toggle-slider:before {
             transform: translateX(24px);
+        }
+
+        .toggle-switch input:not(:checked) + .toggle-slider {
+            background-color: #34d399;
         }
 
         .toggle-switch input:disabled + .toggle-slider {
@@ -684,58 +709,207 @@
             color: #9ca3af;
         }
 
-        /* Single Modality Dropdown */
-        .single-dropdown {
-            position: relative;
-        }
 
-        .dropdown-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-
-        .dropdown-menu {
+        /* Code Inspection Modal */
+        .code-inspection-modal {
             display: none;
-            position: absolute;
-            top: calc(100% + 4px);
+            position: fixed;
+            top: 0;
             left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .code-inspection-modal.active {
+            display: flex;
+        }
+
+        .code-modal-content {
+            width: 90%;
+            max-width: 1400px;
+            height: 80vh;
             background: #1e1e1e;
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .code-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #3d3d3d;
+            background: #2a2a2a;
+        }
+
+        .code-modal-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+
+        .code-modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .code-btn {
+            padding: 0.5rem 1rem;
             border: 1px solid #3d3d3d;
             border-radius: 6px;
-            min-width: 120px;
-            z-index: 100;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-        }
-
-        .dropdown-menu.active {
-            display: block;
-        }
-
-        .dropdown-item {
-            display: block;
-            width: 100%;
-            padding: 0.5rem 1rem;
-            border: none;
-            background: transparent;
-            color: #9ca3af;
+            background: #1e1e1e;
+            color: #e5e7eb;
             font-size: 0.875rem;
-            text-align: left;
             cursor: pointer;
             transition: all 0.2s;
         }
 
-        .dropdown-item:hover {
+        .code-btn:hover {
             background: #2d2d2d;
+            border-color: #6b7280;
+        }
+
+        .code-btn.primary {
+            background: #4b5563;
+            border-color: #4b5563;
+        }
+
+        .code-btn.primary:hover {
+            background: #374151;
+        }
+
+        .code-modal-close {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            line-height: 1;
+        }
+
+        .code-modal-close:hover {
+            color: #fff;
+        }
+
+        .code-tabs {
+            display: flex;
+            gap: 0;
+            padding: 0 1.5rem;
+            border-bottom: 1px solid #3d3d3d;
+            background: #2a2a2a;
+        }
+
+        .code-tab {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background: transparent;
+            color: #9ca3af;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .code-tab:hover {
             color: #e5e7eb;
         }
 
-        .dropdown-item:first-child {
-            border-radius: 6px 6px 0 0;
+        .code-tab.active {
+            color: #60a5fa;
+            border-bottom-color: #60a5fa;
         }
 
-        .dropdown-item:last-child {
-            border-radius: 0 0 6px 6px;
+        .code-content-area {
+            flex: 1;
+            overflow: auto;
+            padding: 1.5rem;
+            background: #0f0f0f;
+        }
+
+        .code-panel {
+            display: none;
+        }
+
+        .code-panel.active {
+            display: block;
+        }
+
+        .code-block {
+            background: #1a1a1a;
+            border: 1px solid #3d3d3d;
+            border-radius: 8px;
+            padding: 1.5rem;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 0.875rem;
+            line-height: 1.6;
+            color: #e5e7eb;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* JSON Syntax Highlighting */
+        .json-key {
+            color: #60a5fa;
+        }
+
+        .json-string {
+            color: #34d399;
+        }
+
+        .json-number {
+            color: #fbbf24;
+        }
+
+        .json-boolean {
+            color: #f87171;
+        }
+
+        .json-null {
+            color: #9ca3af;
+        }
+
+        /* Show Code Button */
+        .show-code-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 0.75rem 1.5rem;
+            background: #4b5563;
+            border: 1px solid #6b7280;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+        }
+
+        .show-code-btn.visible {
+            display: block;
+        }
+
+        .show-code-btn:hover {
+            background: #374151;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+        }
+
+        .show-code-btn svg {
+            display: inline-block;
+            margin-right: 0.5rem;
+            vertical-align: middle;
         }
     </style>
 </head>
@@ -765,28 +939,24 @@
             <button class="modality-btn" data-mode="rrf" title="Multi-vector fusion using Reciprocal Rank Fusion">RRF</button>
             <button class="modality-btn" data-mode="weighted" title="Multi-vector fusion with adjustable weighted score combination">Weighted</button>
             <button class="modality-btn" data-mode="dynamic" title="Multi-vector fusion with dynamic intent routing">Dynamic</button>
-            <div class="single-dropdown">
-                <button class="modality-btn dropdown-btn" id="singleDropdownBtn" title="Single modality search">
-                    <span id="singleModeLabel">SINGLE</span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="margin-left: 4px;">
-                        <path d="M2 4l4 4 4-4z"/>
-                    </svg>
-                </button>
-                <div class="dropdown-menu" id="singleDropdownMenu">
-                    <button class="dropdown-item" data-mode="visual" title="Search visual content only">Visual</button>
-                    <button class="dropdown-item" data-mode="audio" title="Search audio/sound only">Audio</button>
-                    <button class="dropdown-item" data-mode="transcription" title="Search speech/transcription only">Speech</button>
-                </div>
-            </div>
+            <button class="modality-btn" data-mode="visual" title="Search visual content only">Visual</button>
+            <button class="modality-btn" data-mode="audio" title="Search audio/sound only">Audio</button>
+            <button class="modality-btn" data-mode="transcription" title="Search speech/transcription only">Speech</button>
 
             <div class="index-toggle">
                 <span class="index-toggle-label">Backend:</span>
-                <span class="index-mode-indicator mongodb" id="indexModeIndicator">MongoDB (Single Index)</span>
+                <span class="index-mode-indicator s3vectors" id="indexModeIndicator">S3 Vectors (Multi-Index)</span>
                 <label class="toggle-switch" title="Toggle between MongoDB Atlas (single-index) and S3 Vectors (multi-index)">
-                    <input type="checkbox" id="multiIndexToggle" disabled>
+                    <input type="checkbox" id="multiIndexToggle" checked>
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+        </div>
+
+        <div class="partner-logos">
+            <img src="/static/images/TL-logo.png" alt="TwelveLabs" title="TwelveLabs Marengo 3.0">
+            <span class="separator">×</span>
+            <img src="/static/images/bedrock-logo.png" alt="AWS Bedrock" title="Amazon Bedrock">
         </div>
     </header>
 
@@ -904,6 +1074,41 @@
         </div>
     </div>
 
+    <!-- Code Inspection Modal -->
+    <div class="code-inspection-modal" id="codeInspectionModal">
+        <div class="code-modal-content">
+            <div class="code-modal-header">
+                <span class="code-modal-title">Search Code Inspection</span>
+                <div class="code-modal-actions">
+                    <button class="code-btn" id="copyCodeBtn">Copy JSON</button>
+                    <button class="code-btn primary" id="exportCodeBtn">Export JSON</button>
+                    <button class="code-modal-close" id="codeModalClose">&times;</button>
+                </div>
+            </div>
+            <div class="code-tabs">
+                <button class="code-tab active" data-tab="input">Input</button>
+                <button class="code-tab" data-tab="output">Output</button>
+            </div>
+            <div class="code-content-area">
+                <div class="code-panel active" id="inputPanel">
+                    <pre class="code-block" id="inputCode"></pre>
+                </div>
+                <div class="code-panel" id="outputPanel">
+                    <pre class="code-block" id="outputCode"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Show Code Button (floating) -->
+    <button class="show-code-btn" id="showCodeBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+        </svg>
+        Show Code
+    </button>
+
     <script>
         // State
         let currentMode = 'fused';
@@ -926,11 +1131,6 @@
         const modalTitle = document.getElementById('modalTitle');
         const modalInfo = document.getElementById('modalInfo');
         const modalClose = document.getElementById('modalClose');
-
-        // Dropdown elements
-        const singleDropdownBtn = document.getElementById('singleDropdownBtn');
-        const singleDropdownMenu = document.getElementById('singleDropdownMenu');
-        const singleModeLabel = document.getElementById('singleModeLabel');
 
         // Multi-vector modes that use all modalities
         const MULTI_VECTOR_MODES = ['fused', 'rrf', 'weighted', 'dynamic'];
@@ -960,50 +1160,8 @@
             return str.charAt(0).toUpperCase() + str.slice(1);
         }
 
-        // Dropdown toggle
-        singleDropdownBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            singleDropdownMenu.classList.toggle('active');
-        });
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', () => {
-            singleDropdownMenu.classList.remove('active');
-        });
-
-        // Dropdown items
-        document.querySelectorAll('.dropdown-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-
-                // Update all buttons to inactive
-                document.querySelectorAll('.modality-btn').forEach(b => b.classList.remove('active'));
-                singleDropdownBtn.classList.add('active');
-
-                // Update mode and label
-                currentMode = item.dataset.mode;
-                const modeLabels = {
-                    'visual': 'Visual',
-                    'audio': 'Audio',
-                    'transcription': 'Speech'
-                };
-                singleModeLabel.textContent = modeLabels[currentMode];
-
-                // Close dropdown
-                singleDropdownMenu.classList.remove('active');
-
-                // Update panel visibility
-                updatePanelVisibility();
-
-                // Re-run search if we have a query
-                if (searchInput.value.trim()) {
-                    performSearch();
-                }
-            });
-        });
-
-        // Main mode buttons (Fused, RRF, Weighted, Dynamic)
-        document.querySelectorAll('.modality-btn:not(.dropdown-btn)').forEach(btn => {
+        // All mode buttons (Fused, RRF, Weighted, Dynamic, Visual, Audio, Speech)
+        document.querySelectorAll('.modality-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 // Only handle if it has a data-mode attribute
                 if (!btn.dataset.mode) return;
@@ -1011,11 +1169,6 @@
                 document.querySelectorAll('.modality-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentMode = btn.dataset.mode;
-
-                // Reset SINGLE label when switching to multi-vector modes
-                if (MULTI_VECTOR_MODES.includes(currentMode)) {
-                    singleModeLabel.textContent = 'SINGLE';
-                }
 
                 // Update panel visibility
                 updatePanelVisibility();
@@ -1063,6 +1216,7 @@
 
             try {
                 let results;
+                let responseData = {};
 
                 if (currentMode === 'dynamic') {
                     // Dynamic intent-based routing
@@ -1075,9 +1229,9 @@
 
                     if (!response.ok) throw new Error('Search failed');
 
-                    const data = await response.json();
-                    results = data.results;
-                    updateDynamicWeightsDisplay(data.computed_weights);
+                    responseData = await response.json();
+                    results = responseData.results;
+                    updateDynamicWeightsDisplay(responseData.computed_weights);
 
                 } else if (MULTI_VECTOR_MODES.includes(currentMode)) {
                     // Fused, RRF, or Weighted fusion
@@ -1140,6 +1294,12 @@
                 currentResults = results;
                 renderResults(results);
 
+                // Store search data for code inspection
+                storeSearchData(query, results, responseData);
+
+                // Show "Show Code" button
+                showCodeBtn.classList.add('visible');
+
                 // Preload first result video
                 if (results.length > 0 && results[0].video_url) {
                     preloadedVideoUrl = results[0].video_url;
@@ -1152,6 +1312,65 @@
                     </div>
                 `;
             }
+        }
+
+        // Store search data for code inspection
+        function storeSearchData(query, results, responseData) {
+            // Store input configuration
+            searchInputData = {
+                mode: currentMode,
+                query: query,
+                backend: useMultiIndex ? 's3_vectors' : 'mongodb',
+                fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
+                query_embeddings: responseData?.query_embeddings || null,
+                decomposed_queries: responseData?.decomposed_queries || null,
+                weights: {},
+                parameters: {}
+            };
+
+            // Add mode-specific details
+            if (currentMode === 'fused') {
+                searchInputData.weights = { visual: 0.8, audio: 0.1, transcription: 0.05 };
+            } else if (currentMode === 'weighted') {
+                searchInputData.weights = {
+                    visual: parseFloat(document.getElementById('visualWeight').value) / 100,
+                    audio: parseFloat(document.getElementById('audioWeight').value) / 100,
+                    transcription: parseFloat(document.getElementById('transcriptionWeight').value) / 100
+                };
+            } else if (currentMode === 'dynamic') {
+                searchInputData.weights = responseData?.computed_weights || lastDynamicWeights;
+                searchInputData.anchor_similarities = responseData?.anchor_similarities;
+                searchInputData.parameters.alpha = 10;
+            } else if (currentMode === 'rrf') {
+                searchInputData.parameters.k = 60;
+            }
+
+            searchInputData.parameters.top_k = 20;
+            searchInputData.parameters.limit = 20;
+
+            // Store output results
+            searchOutputData = {
+                results: results.map(r => ({
+                    segment_id: r.segment_id,
+                    video_id: r.video_id,
+                    start_time: r.start_time,
+                    end_time: r.end_time,
+                    s3_uri: r.s3_uri,
+                    result_embeddings: r.embedding || null,  // 512d vector from MongoDB
+                    scores: {
+                        ...r.modality_scores,
+                        final: r.fusion_score
+                    },
+                    ranks: r.modality_ranks || null,
+                    metadata: {
+                        video_url: r.video_url,
+                        thumbnail_url: r.thumbnail_url
+                    }
+                })),
+                total_results: results.length,
+                search_time_ms: responseData?.search_time_ms || null,
+                backend: useMultiIndex ? 's3_vectors' : 'mongodb'
+            };
         }
 
         function renderResults(results) {
@@ -1363,17 +1582,123 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeModal();
+            if (e.key === 'Escape') {
+                closeModal();
+                closeCodeModal();
+            }
             if (e.key === '/' && document.activeElement !== searchInput) {
                 e.preventDefault();
                 searchInput.focus();
             }
         });
 
+        // Code Inspection Feature
+        let searchInputData = null;
+        let searchOutputData = null;
+
+        const codeInspectionModal = document.getElementById('codeInspectionModal');
+        const showCodeBtn = document.getElementById('showCodeBtn');
+        const codeModalClose = document.getElementById('codeModalClose');
+        const copyCodeBtn = document.getElementById('copyCodeBtn');
+        const exportCodeBtn = document.getElementById('exportCodeBtn');
+        const inputPanel = document.getElementById('inputPanel');
+        const outputPanel = document.getElementById('outputPanel');
+        const inputCode = document.getElementById('inputCode');
+        const outputCode = document.getElementById('outputCode');
+
+        // Tab switching
+        document.querySelectorAll('.code-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+
+                // Update tab states
+                document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Update panel states
+                document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
+                document.getElementById(`${tabName}Panel`).classList.add('active');
+            });
+        });
+
+        // Show code modal
+        showCodeBtn.addEventListener('click', () => {
+            if (searchInputData && searchOutputData) {
+                displayCodeInspection();
+                codeInspectionModal.classList.add('active');
+            }
+        });
+
+        // Close code modal
+        codeModalClose.addEventListener('click', closeCodeModal);
+        codeInspectionModal.addEventListener('click', (e) => {
+            if (e.target === codeInspectionModal) closeCodeModal();
+        });
+
+        function closeCodeModal() {
+            codeInspectionModal.classList.remove('active');
+        }
+
+        // Copy JSON to clipboard
+        copyCodeBtn.addEventListener('click', async () => {
+            const activeTab = document.querySelector('.code-tab.active').dataset.tab;
+            const jsonData = activeTab === 'input' ? searchInputData : searchOutputData;
+
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(jsonData, null, 2));
+                copyCodeBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyCodeBtn.textContent = 'Copy JSON';
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+            }
+        });
+
+        // Export JSON file
+        exportCodeBtn.addEventListener('click', () => {
+            const combined = {
+                input: searchInputData,
+                output: searchOutputData,
+                timestamp: new Date().toISOString(),
+                mode: currentMode
+            };
+
+            const blob = new Blob([JSON.stringify(combined, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `search_results_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Format JSON with syntax highlighting
+        function formatJSON(json) {
+            const jsonStr = JSON.stringify(json, null, 2);
+            return jsonStr
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+                .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+                .replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+                .replace(/: (true|false)/g, ': <span class="json-boolean">$1</span>')
+                .replace(/: (null)/g, ': <span class="json-null">$1</span>');
+        }
+
+        // Display code inspection
+        function displayCodeInspection() {
+            inputCode.innerHTML = formatJSON(searchInputData);
+            outputCode.innerHTML = formatJSON(searchOutputData);
+        }
+
         // Multi-Index Toggle
         const multiIndexToggle = document.getElementById('multiIndexToggle');
         const indexModeIndicator = document.getElementById('indexModeIndicator');
-        let useMultiIndex = false;
+        let useMultiIndex = true;  // Default to S3 Vectors
 
         // Check index mode availability on load
         async function checkIndexMode() {
@@ -1384,11 +1709,22 @@
                 const data = await response.json();
 
                 if (data.s3_vectors_available) {
-                    // Enable toggle
+                    // S3 Vectors available - keep enabled and checked
                     multiIndexToggle.disabled = false;
+                    multiIndexToggle.checked = true;
+                    useMultiIndex = true;
+                    indexModeIndicator.textContent = 'S3 Vectors (Multi-Index)';
+                    indexModeIndicator.classList.add('s3vectors');
+                    indexModeIndicator.classList.remove('mongodb');
                     multiIndexToggle.title = 'Toggle between MongoDB Atlas (single-index with filter) and S3 Vectors (multi-index)';
                 } else {
-                    // Keep disabled, update tooltip
+                    // S3 Vectors not available - fall back to MongoDB
+                    multiIndexToggle.disabled = true;
+                    multiIndexToggle.checked = false;
+                    useMultiIndex = false;
+                    indexModeIndicator.textContent = 'MongoDB (Single Index)';
+                    indexModeIndicator.classList.add('mongodb');
+                    indexModeIndicator.classList.remove('s3vectors');
                     multiIndexToggle.title = 'S3 Vectors not available. Check AWS credentials and S3 vector bucket configuration.';
                 }
             } catch (error) {

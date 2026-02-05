@@ -30,7 +30,7 @@
         }
 
         .logo {
-            font-size: 1.5rem;
+            font-size: 1rem;
             font-weight: bold;
             color: #e5e7eb;
             display: flex;
@@ -726,6 +726,15 @@
             background-color: #34d399;
         }
 
+        /* Decomposition toggle specific colors */
+        .decomposition-toggle .toggle-switch input:checked + .toggle-slider {
+            background-color: #34d399;  /* Green when enabled */
+        }
+
+        .decomposition-toggle .toggle-switch input:not(:checked) + .toggle-slider {
+            background-color: #6b7280;  /* Grey when disabled */
+        }
+
         .toggle-switch input:disabled + .toggle-slider {
             opacity: 0.5;
             cursor: not-allowed;
@@ -982,7 +991,7 @@
                 <polygon points="23 7 16 12 23 17 23 7"></polygon>
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
             </svg>
-            TwelveLabs Marengo
+            Search
         </div>
 
         <div class="search-container">

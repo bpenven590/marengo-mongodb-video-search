@@ -117,7 +117,7 @@ RRF is rank-based rather than score-based, making it more robust to score distri
 ## Project Structure
 
 ```
-s3-marengo-mongodb-pipeline/
+multi-modal-video-search/
 ├── app.py                        # FastAPI web application (search API)
 ├── src/
 │   ├── lambda_function.py        # Lambda handler for video processing
@@ -158,7 +158,7 @@ s3-marengo-mongodb-pipeline/
 ### 1. Clone and Setup
 
 ```bash
-cd s3-marengo-mongodb-pipeline
+cd multi-modal-video-search
 
 # Create virtual environment
 python3 -m venv venv

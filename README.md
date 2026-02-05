@@ -567,9 +567,110 @@ Follow the detailed guide in [scripts/mongodb_setup.md](scripts/mongodb_setup.md
 4. Whitelist IPs (or use 0.0.0.0/0 for testing)
 5. Update `MONGODB_URI` in your `.env` file
 
-**Optional:** Setup multi-index mode (see [MongoDB Multi-Index Setup](#🗄️-mongodb-multi-index-setup) section)
+**Optional:** Setup multi-index mode (requires M10+ cluster - see below for index creation)
 
-### 3. Deploy Lambda Function
+### 3. Setup S3 Vectors (Alternative to MongoDB)
+
+Amazon S3 Vectors provides a serverless vector storage option with automatic scaling and no infrastructure management.
+
+**Create S3 Bucket:**
+```bash
+aws s3 mb s3://your-bucket-name --region us-east-1
+```
+
+**Create Vector Indexes:**
+```bash
+# Visual embeddings index
+aws s3-vectors create-vector-index \
+  --bucket-name your-bucket-name \
+  --index-name visual-embeddings \
+  --embedding-dimension 512 \
+  --distance-metric COSINE \
+  --region us-east-1
+
+# Audio embeddings index
+aws s3-vectors create-vector-index \
+  --bucket-name your-bucket-name \
+  --index-name audio-embeddings \
+  --embedding-dimension 512 \
+  --distance-metric COSINE \
+  --region us-east-1
+
+# Transcription embeddings index
+aws s3-vectors create-vector-index \
+  --bucket-name your-bucket-name \
+  --index-name transcription-embeddings \
+  --embedding-dimension 512 \
+  --distance-metric COSINE \
+  --region us-east-1
+```
+
+**Update Configuration:**
+```bash
+# In .env file
+S3_VECTORS_BUCKET=your-bucket-name
+AWS_REGION=us-east-1
+```
+
+**IAM Permissions Required:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3-vectors:PutVector",
+        "s3-vectors:QueryVectors",
+        "s3-vectors:DeleteVector"
+      ],
+      "Resource": "arn:aws:s3-vectors:us-east-1:*:bucket/your-bucket-name/*"
+    }
+  ]
+}
+```
+
+**Note:** S3 Vectors only supports multi-index mode in this implementation. The single-index (unified) mode has been removed for performance reasons.
+
+---
+
+### 🔧 Bring Your Own Vector Storage
+
+This project's vector storage layer is abstracted and can be easily replaced with your preferred backend:
+
+**Supported Out-of-the-Box:**
+- MongoDB Atlas (single + multi-index modes)
+- Amazon S3 Vectors (multi-index mode)
+
+**Easy to Integrate:**
+To use a different vector database (Pinecone, Weaviate, Qdrant, Milvus, etc.):
+
+1. Create a new client class in `src/` following the interface pattern:
+   ```python
+   class YourVectorClient:
+       def store_segment_embeddings(self, video_id, segment_id, embeddings, ...):
+           # Store embeddings in your vector DB
+           pass
+
+       def vector_search(self, query_embedding, limit, modality_filter=None):
+           # Search your vector DB
+           pass
+   ```
+
+2. Update `src/search_client.py` to use your client
+3. Update `src/lambda_function.py` to write to your storage
+
+**Key Requirements:**
+- Support 512-dimensional embeddings (Bedrock Marengo 3.0)
+- Cosine similarity distance metric
+- Metadata filtering by `modality_type`, `video_id`, `segment_id`
+- Return results with similarity scores (0-1 range)
+
+The architecture is designed to be storage-agnostic - feel free to modify the code to fit your infrastructure.
+
+---
+
+### 4. Deploy Lambda Function
 
 ```bash
 # Set MongoDB URI
@@ -579,7 +680,7 @@ export MONGODB_URI="your_mongodb_connection_string_here"
 ./scripts/deploy.sh
 ```
 
-### 4. Run Search API Locally
+### 5. Run Search API Locally
 
 ```bash
 # Start the FastAPI server
@@ -588,7 +689,7 @@ python app.py
 # Open browser to http://localhost:8000
 ```
 
-### 5. Process a Video
+### 6. Process a Video
 
 ```bash
 # Invoke Lambda
@@ -600,7 +701,7 @@ aws lambda invoke \
   response.json
 ```
 
-### 6. Search Videos
+### 7. Search Videos
 
 **Via Web UI:** http://localhost:8000
 

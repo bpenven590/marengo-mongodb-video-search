@@ -1,6 +1,6 @@
 # Multi-Vector Video Search Pipeline
 
-A video semantic search pipeline using AWS Bedrock Marengo 3.0 and MongoDB Atlas with multi-vector retrieval and Reciprocal Rank Fusion (RRF).
+A video semantic search pipeline using AWS Bedrock Marengo 3.0 with dual vector storage backends: **MongoDB Atlas** (single-index) and **Amazon S3 Vectors** (multi-index).
 
 ## Live Demo
 
@@ -9,45 +9,91 @@ A video semantic search pipeline using AWS Bedrock Marengo 3.0 and MongoDB Atlas
 ## Architecture Overview
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────┐
-│   S3 Bucket     │     │  AWS Lambda      │     │   MongoDB Atlas         │
-│   (Videos)      │────▶│  (Processing)    │────▶│   (us-east-1)           │
-│                 │     │                  │     │                         │
-│ tl-brice-media/ │     │  ┌────────────┐  │     │ ┌─────────────────────┐ │
-│ WBD_project/    │     │  │  Bedrock   │  │     │ │  video_embeddings   │ │
-│ Videos/Ready/   │     │  │  Marengo   │  │     │ │  (single collection)│ │
-└────────┬────────┘     │  │  3.0       │  │     │ │                     │ │
-         │              │  └────────────┘  │     │ │  modality_type:     │ │
-    S3 Trigger          │                  │     │ │  - visual           │ │
-    (automatic)         │  Embeddings:     │     │ │  - audio            │ │
-                        │  - Visual (512d) │     │ │  - transcription    │ │
-                        │  - Audio (512d)  │     │ │                     │ │
-                        │  - Transcription │     │ │  HNSW Vector Index  │ │
-                        │    (512d)        │     │ │  + Filter Fields    │ │
-                        └──────────────────┘     │ └─────────────────────┘ │
-                                                 └────────────┬────────────┘
-                                                              │
-┌─────────────────┐     ┌──────────────────┐                  │
-│   CloudFront    │     │  AWS App Runner  │                  │
-│   (CDN)         │◀────│  (Search API)    │◀─────────────────┘
+┌─────────────────┐     ┌──────────────────┐
+│   S3 Bucket     │     │  AWS Lambda      │
+│   (Videos)      │────▶│  (Processing)    │
+│                 │     │                  │
+│ tl-brice-media/ │     │  ┌────────────┐  │
+│ WBD_project/    │     │  │  Bedrock   │  │
+│ Videos/Ready/   │     │  │  Marengo   │  │
+└────────┬────────┘     │  │  3.0       │  │
+         │              │  └────────────┘  │
+    S3 Trigger          │                  │
+    (automatic)         │  Embeddings:     │
+                        │  - Visual (512d) │
+                        │  - Audio (512d)  │
+                        │  - Transcription │
+                        │    (512d)        │
+                        └─────────┬────────┘
+                                  │
+         ┌────────────────────────┴────────────────────────┐
+         │                                                 │
+         ▼                                                 ▼
+┌─────────────────────────┐               ┌─────────────────────────────┐
+│   MongoDB Atlas         │               │   Amazon S3 Vectors         │
+│   (Single Index Mode)   │               │   (Multi-Index Mode)        │
+│                         │               │                             │
+│ ┌─────────────────────┐ │               │ ┌─────────────────────────┐ │
+│ │  video_embeddings   │ │               │ │  visual-embeddings      │ │
+│ │  (single collection)│ │               │ │  (separate index)       │ │
+│ │                     │ │               │ ├─────────────────────────┤ │
+│ │  modality_type:     │ │               │ │  audio-embeddings       │ │
+│ │  - visual           │ │               │ │  (separate index)       │ │
+│ │  - audio            │ │               │ ├─────────────────────────┤ │
+│ │  - transcription    │ │               │ │  transcription-embs     │ │
+│ │                     │ │               │ │  (separate index)       │ │
+│ │  HNSW Vector Index  │ │               │ └─────────────────────────┘ │
+│ │  + Filter Fields    │ │               │  Bucket: brice-video-       │
+│ └─────────────────────┘ │               │  search-multimodal          │
+└────────────┬────────────┘               └─────────────┬───────────────┘
+             │                                          │
+             └──────────────────┬───────────────────────┘
+                                │
+┌─────────────────┐     ┌───────┴──────────┐
+│   CloudFront    │     │  AWS App Runner  │
+│   (CDN)         │◀────│  (Search API)    │
 │                 │     │                  │
 │ Video streaming │     │  ┌────────────┐  │
 │ + thumbnails    │     │  │  FastAPI   │  │
 └─────────────────┘     │  │  + RRF     │  │
                         │  │  Fusion    │  │
                         │  └────────────┘  │
+                        │                  │
+                        │  UI Toggle:      │
+                        │  MongoDB ↔ S3    │
+                        │  Vectors         │
                         └──────────────────┘
 ```
 
-### Single Collection with Modality Filtering
+## Vector Storage Backends
 
-This implementation uses a **single collection** (`video_embeddings`) with a `modality_type` field, following the "Single index with distinguished modalities" pattern from the TwelveLabs guidance (Section 3.2.1).
+### MongoDB Atlas (Single Index Mode) - Default
+
+Uses a **single collection** (`video_embeddings`) with a `modality_type` field, following the "Single index with distinguished modalities" pattern from the TwelveLabs guidance (Section 3.2.1).
 
 **Benefits:**
 - Pre-filter by `modality_type` to search specific modalities
 - Search all modalities in one query
 - Simpler index management
 - Flexible fusion strategies
+- Free tier available (M0)
+
+**Limitation:** MongoDB Atlas free tier allows only 3 vector indexes.
+
+### Amazon S3 Vectors (Multi-Index Mode)
+
+Uses **separate indexes** per modality in a dedicated S3 vector bucket (`brice-video-search-multimodal`), providing true multi-index search.
+
+**Benefits:**
+- Dedicated index per modality (no filter overhead)
+- Potentially faster for modality-specific queries
+- Native AWS integration
+- No index count limitations
+
+**Indexes:**
+- `visual-embeddings` - 512-dimensional visual embeddings
+- `audio-embeddings` - 512-dimensional audio embeddings
+- `transcription-embeddings` - 512-dimensional transcription embeddings
 
 ### Reciprocal Rank Fusion (RRF)
 
@@ -72,21 +118,23 @@ RRF is rank-based rather than score-based, making it more robust to score distri
 
 ```
 s3-marengo-mongodb-pipeline/
-├── app.py                   # FastAPI web application (search API)
+├── app.py                        # FastAPI web application (search API)
 ├── src/
-│   ├── lambda_function.py   # Lambda handler for video processing
-│   ├── bedrock_client.py    # Bedrock Marengo client
-│   ├── mongodb_client.py    # MongoDB embedding storage
-│   ├── search_client.py     # Video search client with RRF fusion
-│   └── query_fusion.py      # Legacy query fusion script
+│   ├── lambda_function.py        # Lambda handler for video processing
+│   ├── bedrock_client.py         # Bedrock Marengo client
+│   ├── mongodb_client.py         # MongoDB embedding storage
+│   ├── s3_vectors_client.py      # S3 Vectors embedding storage & search
+│   ├── search_client.py          # Video search client with RRF fusion
+│   └── query_fusion.py           # Legacy query fusion script
 ├── static/
-│   └── index.html           # Search UI frontend
+│   └── index.html                # Search UI frontend (MongoDB/S3 Vectors toggle)
 ├── scripts/
-│   ├── deploy.sh            # AWS CLI deployment script
-│   └── mongodb_setup.md     # MongoDB Atlas setup guide
-├── requirements.txt         # Python dependencies
-├── .env.example             # Environment variables template
-└── README.md                # This file
+│   ├── deploy.sh                 # AWS CLI deployment script
+│   ├── mongodb_setup.md          # MongoDB Atlas setup guide
+│   └── migrate_to_s3_vectors.py  # Migration script: MongoDB → S3 Vectors
+├── requirements.txt              # Python dependencies
+├── .env.example                  # Environment variables template
+└── README.md                     # This file
 ```
 
 ---
@@ -133,6 +181,34 @@ Follow the detailed guide in [scripts/mongodb_setup.md](scripts/mongodb_setup.md
 3. Create the `video_embeddings` collection with vector index
 4. Whitelist IPs (or use 0.0.0.0/0 for testing)
 5. Update `MONGODB_URI` in your `.env` file
+
+### 2b. Setup S3 Vectors (Optional - Multi-Index Mode)
+
+To enable the S3 Vectors backend for multi-index search:
+
+```bash
+# Create vector bucket
+aws s3vectors create-vector-bucket \
+  --vector-bucket-name brice-video-search-multimodal \
+  --region us-east-1
+
+# Create indexes for each modality (512 dimensions, cosine similarity)
+for index in visual-embeddings audio-embeddings transcription-embeddings; do
+  aws s3vectors create-index \
+    --vector-bucket-name brice-video-search-multimodal \
+    --index-name $index \
+    --data-type float32 \
+    --dimension 512 \
+    --distance-metric cosine \
+    --metadata-configuration '{
+      "nonFilterableMetadataKeys": ["video_id", "segment_id", "s3_uri", "start_time", "end_time"]
+    }' \
+    --region us-east-1
+done
+
+# Migrate existing embeddings from MongoDB to S3 Vectors
+MONGODB_URI='your_mongodb_uri' python scripts/migrate_to_s3_vectors.py
+```
 
 ### 3. Deploy Lambda Function
 
@@ -373,6 +449,29 @@ results = client.vector_search(
 )
 ```
 
+### S3VectorsClient (s3_vectors_client.py)
+
+```python
+from src.s3_vectors_client import S3VectorsClient
+
+client = S3VectorsClient(
+    bucket_name="brice-video-search-multimodal",
+    region="us-east-1"
+)
+
+# Store embeddings (writes to all 3 modality indexes)
+result = client.store_all_segments(video_id="abc123", segments=segments)
+
+# Search with fusion across modalities
+results = client.search_with_fusion(
+    query_embedding=embedding,
+    modalities=["visual", "audio", "transcription"],
+    weights={"visual": 0.8, "audio": 0.1, "transcription": 0.05},
+    limit=10,
+    fusion_method="rrf"  # or "weighted"
+)
+```
+
 ---
 
 ## Cost Estimation
@@ -420,6 +519,7 @@ Based on Marengo 3.0 pricing:
 
 - [TwelveLabs Multi-Vector Guidance](./A%20Guidance%20on%20Multi-Vector%20Video%20Search%20with%20TwelveLabs%20Marengo.pdf) - Section 3.2.1 (Single index with distinguished modalities)
 - [MongoDB Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/)
+- [Amazon S3 Vectors Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors.html)
 - [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
 
 ---

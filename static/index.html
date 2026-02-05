@@ -619,12 +619,12 @@
             font-weight: 500;
         }
 
-        .index-mode-indicator.single {
+        .index-mode-indicator.mongodb {
             background: rgba(59, 130, 246, 0.2);
             color: #60a5fa;
         }
 
-        .index-mode-indicator.multi {
+        .index-mode-indicator.s3vectors {
             background: rgba(16, 185, 129, 0.2);
             color: #34d399;
         }
@@ -661,9 +661,9 @@
             <button class="modality-btn" data-mode="transcription" title="Speech only">Speech</button>
 
             <div class="index-toggle">
-                <span class="index-toggle-label">Index:</span>
-                <span class="index-mode-indicator single" id="indexModeIndicator">Single</span>
-                <label class="toggle-switch" title="Toggle between single index (filter) and multi-index (separate collections)">
+                <span class="index-toggle-label">Backend:</span>
+                <span class="index-mode-indicator mongodb" id="indexModeIndicator">MongoDB</span>
+                <label class="toggle-switch" title="Toggle between MongoDB Atlas (single-index) and S3 Vectors (multi-index)">
                     <input type="checkbox" id="multiIndexToggle" disabled>
                     <span class="toggle-slider"></span>
                 </label>
@@ -1163,13 +1163,13 @@
 
                 const data = await response.json();
 
-                if (data.multi_index_available) {
+                if (data.s3_vectors_available) {
                     // Enable toggle
                     multiIndexToggle.disabled = false;
-                    multiIndexToggle.title = 'Toggle between single index (filter) and multi-index (separate collections)';
+                    multiIndexToggle.title = 'Toggle between MongoDB Atlas (single-index with filter) and S3 Vectors (multi-index)';
                 } else {
                     // Keep disabled, update tooltip
-                    multiIndexToggle.title = 'Multi-index not available. Run migration script to enable.';
+                    multiIndexToggle.title = 'S3 Vectors not available. Check AWS credentials and S3 vector bucket configuration.';
                 }
             } catch (error) {
                 console.log('Index mode check failed:', error);
@@ -1182,13 +1182,13 @@
 
             // Update indicator
             if (useMultiIndex) {
-                indexModeIndicator.textContent = 'Multi';
-                indexModeIndicator.classList.remove('single');
-                indexModeIndicator.classList.add('multi');
+                indexModeIndicator.textContent = 'S3 Vectors';
+                indexModeIndicator.classList.remove('mongodb');
+                indexModeIndicator.classList.add('s3vectors');
             } else {
-                indexModeIndicator.textContent = 'Single';
-                indexModeIndicator.classList.remove('multi');
-                indexModeIndicator.classList.add('single');
+                indexModeIndicator.textContent = 'MongoDB';
+                indexModeIndicator.classList.remove('s3vectors');
+                indexModeIndicator.classList.add('mongodb');
             }
 
             // Re-run search if we have a query

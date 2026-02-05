@@ -1,0 +1,478 @@
+"""
+S3 Vectors Client for Multi-Modal Video Search
+
+Provides vector storage and search using Amazon S3 Vectors
+with separate indexes for visual, audio, and transcription modalities.
+
+This serves as the multi-index backend (alternative to MongoDB single-index).
+"""
+
+import math
+import os
+import boto3
+from typing import Optional, List
+from datetime import datetime
+
+
+# AWS Profile for SSO authentication
+AWS_PROFILE = os.environ.get("AWS_PROFILE", "TlFullDevelopmentAccess-026090552520")
+
+
+class S3VectorsClient:
+    """Client for storing and querying multi-modal embeddings in S3 Vectors."""
+
+    # Index names for each modality
+    INDEX_NAMES = {
+        "visual": "visual-embeddings",
+        "audio": "audio-embeddings",
+        "transcription": "transcription-embeddings"
+    }
+
+    # Valid modality types
+    MODALITY_TYPES = ["visual", "audio", "transcription"]
+
+    # Embedding dimension for Marengo 3.0
+    EMBEDDING_DIMENSION = 512
+
+    # RRF constant (standard value used by Elasticsearch, etc.)
+    RRF_K = 60
+
+    # Default weights for fusion
+    DEFAULT_WEIGHTS = {
+        "visual": 0.8,
+        "audio": 0.1,
+        "transcription": 0.05
+    }
+
+    def __init__(
+        self,
+        bucket_name: str = "brice-video-search-multimodal",
+        region: str = "us-east-1",
+        profile_name: Optional[str] = None
+    ):
+        """
+        Initialize the S3 Vectors client.
+
+        Args:
+            bucket_name: Name of the S3 vector bucket.
+            region: AWS region.
+            profile_name: AWS profile to use (default from AWS_PROFILE env var).
+        """
+        self.bucket_name = bucket_name
+        self.region = region
+
+        # Use profile for SSO authentication
+        profile = profile_name or AWS_PROFILE
+        try:
+            session = boto3.Session(profile_name=profile)
+            self.client = session.client("s3vectors", region_name=region)
+        except Exception:
+            # Fall back to default credentials if profile fails
+            self.client = boto3.client("s3vectors", region_name=region)
+
+    def store_segment_embeddings(
+        self,
+        video_id: str,
+        segment_id: int,
+        s3_uri: str,
+        start_time: float,
+        end_time: float,
+        embeddings: dict
+    ) -> dict:
+        """
+        Store embeddings for a video segment across modality-specific indexes.
+
+        Args:
+            video_id: Unique identifier for the video
+            segment_id: Segment index within the video
+            s3_uri: S3 URI of the source video
+            start_time: Segment start time in seconds
+            end_time: Segment end time in seconds
+            embeddings: Dict containing 'visual', 'audio', and/or 'transcription' embeddings
+
+        Returns:
+            Dictionary with status for each modality
+        """
+        results = {}
+
+        for modality in self.MODALITY_TYPES:
+            if modality not in embeddings or not embeddings[modality]:
+                continue
+
+            index_name = self.INDEX_NAMES[modality]
+            vector_key = f"{video_id}_{segment_id}"
+
+            # Prepare vector with metadata
+            vector_data = {
+                "key": vector_key,
+                "data": {"float32": embeddings[modality]},
+                "metadata": {
+                    "video_id": video_id,
+                    "segment_id": str(segment_id),  # S3 Vectors metadata values are strings
+                    "s3_uri": s3_uri,
+                    "start_time": str(start_time),
+                    "end_time": str(end_time)
+                }
+            }
+
+            try:
+                self.client.put_vectors(
+                    vectorBucketName=self.bucket_name,
+                    indexName=index_name,
+                    vectors=[vector_data]
+                )
+                results[modality] = "success"
+            except Exception as e:
+                results[modality] = f"error: {str(e)}"
+
+        return results
+
+    def store_all_segments(self, video_id: str, segments: list) -> dict:
+        """
+        Store all segments from a video processing result.
+
+        Args:
+            video_id: Unique identifier for the video
+            segments: List of segment dictionaries from BedrockMarengoClient
+
+        Returns:
+            Summary of stored segments
+        """
+        results = {
+            "video_id": video_id,
+            "segments_processed": 0,
+            "visual_stored": 0,
+            "audio_stored": 0,
+            "transcription_stored": 0
+        }
+
+        for segment in segments:
+            status = self.store_segment_embeddings(
+                video_id=video_id,
+                segment_id=segment["segment_id"],
+                s3_uri=segment["s3_uri"],
+                start_time=segment["start_time"],
+                end_time=segment["end_time"],
+                embeddings=segment.get("embeddings", {})
+            )
+
+            results["segments_processed"] += 1
+            if status.get("visual") == "success":
+                results["visual_stored"] += 1
+            if status.get("audio") == "success":
+                results["audio_stored"] += 1
+            if status.get("transcription") == "success":
+                results["transcription_stored"] += 1
+
+        return results
+
+    def vector_search(
+        self,
+        query_embedding: list,
+        modality: str,
+        limit: int = 50,
+        video_id_filter: Optional[str] = None
+    ) -> list:
+        """
+        Perform vector similarity search on a specific modality index.
+
+        Args:
+            query_embedding: Query embedding vector (512 dimensions)
+            modality: Which modality index to search ("visual", "audio", "transcription")
+            limit: Maximum number of results to return
+            video_id_filter: Optional filter by video ID (post-filter, not pre-filter)
+
+        Returns:
+            List of matching vectors with scores and metadata
+        """
+        if modality not in self.INDEX_NAMES:
+            raise ValueError(f"Invalid modality: {modality}")
+
+        index_name = self.INDEX_NAMES[modality]
+
+        try:
+            response = self.client.query_vectors(
+                vectorBucketName=self.bucket_name,
+                indexName=index_name,
+                queryVector={"float32": query_embedding},
+                topK=limit * 2 if video_id_filter else limit,  # Get more if filtering
+                returnMetadata=True,
+                returnDistance=True
+            )
+
+            results = []
+            for vector in response.get("vectors", []):
+                metadata = vector.get("metadata", {})
+
+                # Post-filter by video_id if specified
+                if video_id_filter and metadata.get("video_id") != video_id_filter:
+                    continue
+
+                results.append({
+                    "video_id": metadata.get("video_id", ""),
+                    "segment_id": int(metadata.get("segment_id", 0)),
+                    "s3_uri": metadata.get("s3_uri", ""),
+                    "start_time": float(metadata.get("start_time", 0)),
+                    "end_time": float(metadata.get("end_time", 0)),
+                    "modality_type": modality,
+                    # S3 Vectors returns distance, convert to similarity score
+                    # For cosine distance: similarity = 1 - distance
+                    "score": 1 - vector.get("distance", 0)
+                })
+
+                if len(results) >= limit:
+                    break
+
+            return results
+
+        except Exception as e:
+            print(f"S3 Vectors search error for {modality}: {e}")
+            return []
+
+    def multi_modality_search(
+        self,
+        query_embedding: list,
+        limit_per_modality: int = 50,
+        modalities: Optional[List[str]] = None,
+        video_id_filter: Optional[str] = None
+    ) -> dict:
+        """
+        Search across multiple modalities and return results grouped by modality.
+
+        Args:
+            query_embedding: Query embedding vector
+            limit_per_modality: Max results per modality
+            modalities: List of modalities to search (default: all three)
+            video_id_filter: Optional filter by video ID
+
+        Returns:
+            Dictionary with results grouped by modality type
+        """
+        if modalities is None:
+            modalities = self.MODALITY_TYPES
+
+        results = {}
+        for modality in modalities:
+            if modality in self.MODALITY_TYPES:
+                results[modality] = self.vector_search(
+                    query_embedding=query_embedding,
+                    modality=modality,
+                    limit=limit_per_modality,
+                    video_id_filter=video_id_filter
+                )
+
+        return results
+
+    def get_index_stats(self) -> dict:
+        """Get vector counts for each modality index."""
+        stats = {}
+        for modality, index_name in self.INDEX_NAMES.items():
+            try:
+                response = self.client.get_index(
+                    vectorBucketName=self.bucket_name,
+                    indexName=index_name
+                )
+                # Note: S3 Vectors doesn't provide vector count directly
+                # We'd need to list vectors to count them
+                stats[modality] = {
+                    "index_name": index_name,
+                    "status": response.get("status", "unknown")
+                }
+            except Exception as e:
+                stats[modality] = {"error": str(e)}
+
+        return stats
+
+    def delete_video_embeddings(self, video_id: str) -> dict:
+        """
+        Delete all embeddings for a specific video from all indexes.
+
+        Args:
+            video_id: Video identifier
+
+        Returns:
+            Dictionary with deletion status per modality
+        """
+        results = {}
+
+        for modality, index_name in self.INDEX_NAMES.items():
+            try:
+                # List vectors for this video
+                # Note: S3 Vectors requires knowing the keys to delete
+                # We'll need to search and collect keys first
+                deleted_keys = []
+
+                # Search for vectors from this video (using a dummy query)
+                # This is a workaround since S3 Vectors doesn't support listing by metadata
+                response = self.client.list_vectors(
+                    vectorBucketName=self.bucket_name,
+                    indexName=index_name,
+                    maxResults=1000  # Adjust as needed
+                )
+
+                for vector in response.get("vectors", []):
+                    key = vector.get("key", "")
+                    if key.startswith(f"{video_id}_"):
+                        deleted_keys.append(key)
+
+                if deleted_keys:
+                    self.client.delete_vectors(
+                        vectorBucketName=self.bucket_name,
+                        indexName=index_name,
+                        keys=deleted_keys
+                    )
+
+                results[modality] = {"deleted_count": len(deleted_keys)}
+
+            except Exception as e:
+                results[modality] = {"error": str(e)}
+
+        return results
+
+
+    def search_with_fusion(
+        self,
+        query_embedding: list,
+        modalities: Optional[List[str]] = None,
+        weights: Optional[dict] = None,
+        limit: int = 50,
+        video_id_filter: Optional[str] = None,
+        fusion_method: str = "rrf"
+    ) -> list:
+        """
+        Search across modalities with fusion (RRF or weighted).
+
+        Args:
+            query_embedding: Query embedding vector (512 dimensions)
+            modalities: List of modalities to search
+            weights: Weights per modality
+            limit: Maximum results
+            video_id_filter: Optional filter by video ID
+            fusion_method: "rrf" or "weighted"
+
+        Returns:
+            List of fused results with fusion scores
+        """
+        if modalities is None:
+            modalities = self.MODALITY_TYPES
+
+        if weights is None:
+            weights = self.DEFAULT_WEIGHTS.copy()
+
+        # Search each modality
+        modality_results = self.multi_modality_search(
+            query_embedding=query_embedding,
+            limit_per_modality=limit * 2,
+            modalities=modalities,
+            video_id_filter=video_id_filter
+        )
+
+        # Apply fusion
+        if fusion_method == "rrf":
+            return self._rrf_fusion(modality_results, weights, limit)
+        else:
+            return self._weighted_fusion(modality_results, weights, limit)
+
+    def _rrf_fusion(
+        self,
+        modality_results: dict,
+        weights: dict,
+        limit: int
+    ) -> list:
+        """
+        Reciprocal Rank Fusion (RRF).
+
+        Formula: score(d) = Σ w_m / (k + rank_m(d))
+        """
+        segment_scores = {}
+
+        for modality, results in modality_results.items():
+            weight = weights.get(modality, 1.0)
+
+            for rank, doc in enumerate(results, start=1):
+                key = (doc["video_id"], doc["start_time"])
+
+                if key not in segment_scores:
+                    segment_scores[key] = {
+                        "video_id": doc["video_id"],
+                        "segment_id": doc.get("segment_id", 0),
+                        "start_time": doc["start_time"],
+                        "end_time": doc["end_time"],
+                        "s3_uri": doc["s3_uri"],
+                        "rrf_score": 0.0,
+                        "modality_scores": {},
+                        "modality_ranks": {}
+                    }
+
+                # RRF contribution: weight / (k + rank)
+                rrf_contribution = weight / (self.RRF_K + rank)
+                segment_scores[key]["rrf_score"] += rrf_contribution
+                segment_scores[key]["modality_scores"][modality] = doc["score"]
+                segment_scores[key]["modality_ranks"][modality] = rank
+
+        # Sort by RRF score
+        ranked = sorted(
+            segment_scores.values(),
+            key=lambda x: x["rrf_score"],
+            reverse=True
+        )
+
+        # Normalize and rename for API consistency
+        for item in ranked:
+            item["fusion_score"] = item.pop("rrf_score")
+
+        return ranked[:limit]
+
+    def _weighted_fusion(
+        self,
+        modality_results: dict,
+        weights: dict,
+        limit: int
+    ) -> list:
+        """
+        Simple weighted score fusion.
+
+        Formula: score(d) = Σ w_m * sim_m(d)
+        """
+        segment_scores = {}
+
+        for modality, results in modality_results.items():
+            for doc in results:
+                key = (doc["video_id"], doc["start_time"])
+
+                if key not in segment_scores:
+                    segment_scores[key] = {
+                        "video_id": doc["video_id"],
+                        "segment_id": doc.get("segment_id", 0),
+                        "start_time": doc["start_time"],
+                        "end_time": doc["end_time"],
+                        "s3_uri": doc["s3_uri"],
+                        "modality_scores": {}
+                    }
+
+                segment_scores[key]["modality_scores"][modality] = doc["score"]
+
+        # Compute weighted sum
+        total_weight = sum(weights.values())
+        for key, data in segment_scores.items():
+            fusion_score = sum(
+                (weights.get(m, 0) / total_weight) * data["modality_scores"].get(m, 0)
+                for m in modality_results.keys()
+            )
+            data["fusion_score"] = fusion_score
+
+        ranked = sorted(
+            segment_scores.values(),
+            key=lambda x: x["fusion_score"],
+            reverse=True
+        )
+
+        return ranked[:limit]
+
+
+def create_client(
+    bucket_name: str = "brice-video-search-multimodal",
+    region: str = "us-east-1"
+) -> S3VectorsClient:
+    """Factory function to create an S3VectorsClient."""
+    return S3VectorsClient(bucket_name=bucket_name, region=region)

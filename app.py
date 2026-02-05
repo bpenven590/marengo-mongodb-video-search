@@ -125,13 +125,16 @@ async def health():
 
 @app.get("/api/index-mode")
 async def get_index_mode():
-    """Check available index modes."""
+    """Check available index modes (MongoDB single-index vs S3 Vectors multi-index)."""
     client = get_search_client()
-    has_multi = client.has_multi_index_collections()
+    has_s3_vectors = client.has_s3_vectors_backend()
     return {
+        "mongodb_available": True,
+        "s3_vectors_available": has_s3_vectors,
+        "default": "mongodb",
+        # Legacy fields for backward compatibility
         "single_index_available": True,
-        "multi_index_available": has_multi,
-        "default": "single"
+        "multi_index_available": has_s3_vectors
     }
 
 

@@ -2,12 +2,16 @@
 Multi-Modal Video Search Client
 
 Performs fusion search across visual, audio, and transcription
-embeddings stored in MongoDB Atlas.
+embeddings stored in MongoDB Atlas or S3 Vectors.
 
 Supports multiple fusion methods:
 1. Reciprocal Rank Fusion (RRF) - rank-based fusion, more robust
 2. Weighted Score Fusion - simple weighted sum
 3. Dynamic Intent Routing - auto-calculates weights based on query intent
+
+Backend options:
+- MongoDB Atlas: Single collection with modality_type filter (default)
+- S3 Vectors: Separate indexes per modality (multi-index mode)
 
 RRF formula: score(d) = Σ w_m / (k + rank_m(d))
 """
@@ -17,6 +21,7 @@ from typing import Optional
 from pymongo import MongoClient
 
 from bedrock_client import BedrockMarengoClient
+from s3_vectors_client import S3VectorsClient
 
 
 # Anchor text prompts for dynamic intent routing (Section 4.3 of whitepaper)
@@ -95,6 +100,24 @@ class VideoSearchClient:
         # Multi-index collections (lazy initialized)
         self._modality_collections = None
 
+        # S3 Vectors client for multi-index mode (lazy initialized)
+        self._s3_vectors_client = None
+
+    def get_s3_vectors_client(self) -> S3VectorsClient:
+        """Get or create the S3 Vectors client."""
+        if self._s3_vectors_client is None:
+            self._s3_vectors_client = S3VectorsClient()
+        return self._s3_vectors_client
+
+    def has_s3_vectors_backend(self) -> bool:
+        """Check if S3 Vectors backend is available."""
+        try:
+            client = self.get_s3_vectors_client()
+            stats = client.get_index_stats()
+            return all("error" not in v for v in stats.values())
+        except Exception:
+            return False
+
     def get_modality_collection(self, modality: str):
         """Get the collection for a specific modality (multi-index mode)."""
         collection_name = self.MODALITY_COLLECTIONS.get(modality)
@@ -169,7 +192,7 @@ class VideoSearchClient:
         video_id: Optional[str] = None,
         fusion_method: str = "rrf",  # "rrf", "weighted", or "dynamic"
         k_per_modality: int = 20,
-        use_multi_index: bool = False  # True = separate collections, False = single with filter
+        use_multi_index: bool = False  # True = S3 Vectors, False = MongoDB single-index
     ) -> list:
         """
         Search for video segments matching a text query.
@@ -181,8 +204,8 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             fusion_method: "rrf" (Reciprocal Rank Fusion) or "weighted" (score sum)
-            use_multi_index: If True, query separate collections per modality (no filter needed)
-                           If False, query single collection with modality_type filter
+            use_multi_index: If True, use S3 Vectors (separate indexes per modality)
+                           If False, use MongoDB single collection with modality_type filter
 
         Returns:
             List of ranked results with fusion scores
@@ -200,7 +223,19 @@ class VideoSearchClient:
         if not query_embedding:
             return []
 
-        # Search each modality and collect ranked results
+        # Use S3 Vectors for multi-index mode
+        if use_multi_index:
+            s3v_client = self.get_s3_vectors_client()
+            return s3v_client.search_with_fusion(
+                query_embedding=query_embedding,
+                modalities=modalities,
+                weights=weights,
+                limit=limit,
+                video_id_filter=video_id,
+                fusion_method=fusion_method
+            )
+
+        # MongoDB single-index mode
         modality_results = {}
 
         for modality in modalities:
@@ -208,17 +243,10 @@ class VideoSearchClient:
             if weight == 0:
                 continue
 
-            # Choose collection and filter based on index mode
-            if use_multi_index:
-                # Multi-index: query dedicated collection, no modality filter needed
-                collection = self.get_modality_collection(modality)
-                filter_doc = {"video_id": video_id} if video_id else {}
-            else:
-                # Single-index: query main collection with modality filter
-                collection = self.collection
-                filter_doc = {"modality_type": modality}
-                if video_id:
-                    filter_doc["video_id"] = video_id
+            collection = self.collection
+            filter_doc = {"modality_type": modality}
+            if video_id:
+                filter_doc["video_id"] = video_id
 
             pipeline = [
                 {
@@ -380,7 +408,7 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             temperature: Softmax temperature (higher = more uniform weights)
-            use_multi_index: If True, query separate collections per modality
+            use_multi_index: If True, use S3 Vectors (separate indexes per modality)
 
         Returns:
             Dict with 'results', 'weights', and 'similarities'
@@ -400,20 +428,33 @@ class VideoSearchClient:
         weights = dynamic_result["weights"]
         similarities = dynamic_result["similarities"]
 
-        # Search each modality
         modalities = ["visual", "audio", "transcription"]
+
+        # Use S3 Vectors for multi-index mode
+        if use_multi_index:
+            s3v_client = self.get_s3_vectors_client()
+            results = s3v_client.search_with_fusion(
+                query_embedding=query_embedding,
+                modalities=modalities,
+                weights=weights,
+                limit=limit,
+                video_id_filter=video_id,
+                fusion_method="weighted"
+            )
+            return {
+                "results": results,
+                "weights": weights,
+                "similarities": similarities
+            }
+
+        # MongoDB single-index mode
         modality_results = {}
 
         for modality in modalities:
-            # Choose collection and filter based on index mode
-            if use_multi_index:
-                collection = self.get_modality_collection(modality)
-                filter_doc = {"video_id": video_id} if video_id else {}
-            else:
-                collection = self.collection
-                filter_doc = {"modality_type": modality}
-                if video_id:
-                    filter_doc["video_id"] = video_id
+            collection = self.collection
+            filter_doc = {"modality_type": modality}
+            if video_id:
+                filter_doc["video_id"] = video_id
 
             pipeline = [
                 {
@@ -423,7 +464,7 @@ class VideoSearchClient:
                         "queryVector": query_embedding,
                         "numCandidates": limit * 6,
                         "limit": limit * 2,
-                        "filter": filter_doc if filter_doc else None
+                        "filter": filter_doc
                     }
                 },
                 {
@@ -437,10 +478,6 @@ class VideoSearchClient:
                     }
                 }
             ]
-
-            # Remove None filter if empty
-            if not filter_doc:
-                del pipeline[0]["$vectorSearch"]["filter"]
 
             results = list(collection.aggregate(pipeline))
 

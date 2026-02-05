@@ -73,7 +73,7 @@ class MongoDBEmbeddingClient:
         start_time: float,
         end_time: float,
         embeddings: dict,
-        dual_write: bool = True
+        dual_write: bool = False
     ) -> dict:
         """
         Store embeddings for a video segment (all modalities).

@@ -194,7 +194,10 @@ def lambda_handler(event: dict, context) -> dict:
                 s3_client.copy_object(
                     CopySource=copy_source,
                     Bucket=bucket,
-                    Key=proxy_key
+                    Key=proxy_key,
+                    ServerSideEncryption='AES256',
+                    TaggingDirective='COPY',
+                    MetadataDirective='COPY'
                 )
 
                 # Delete from Ready location

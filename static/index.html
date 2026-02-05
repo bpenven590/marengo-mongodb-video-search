@@ -1930,13 +1930,15 @@
         backendDropdown.addEventListener('change', () => {
             selectedBackend = backendDropdown.value;
 
-            // For MongoDB, disable single-index mode (not yet implemented)
-            // TODO: Remove this once MongoDB unified-embeddings index is created
-            if (selectedBackend === 'mongodb' && !useMultiIndex) {
-                // Force multi-index for MongoDB
-                useMultiIndex = true;
-                indexModeToggle.checked = true;
+            // MongoDB only supports single-index mode (free tier limit: 3 indexes max)
+            if (selectedBackend === 'mongodb') {
+                useMultiIndex = false;
+                indexModeToggle.checked = false;
+                indexModeToggle.disabled = true;  // Disable toggle for MongoDB
                 updateIndexModeIndicator();
+            } else {
+                // S3 Vectors supports both modes
+                indexModeToggle.disabled = false;
             }
 
             // Re-run search if we have a query

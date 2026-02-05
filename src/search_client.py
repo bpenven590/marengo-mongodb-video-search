@@ -45,6 +45,10 @@ def cosine_similarity(vec1: list, vec2: list) -> float:
 
 def softmax_with_temperature(scores: dict, temperature: float = 10.0) -> dict:
     """Apply softmax with temperature to get weights."""
+    # Handle empty input - return empty dict
+    if not scores:
+        return {}
+
     # Scale by temperature
     scaled = {k: v * temperature for k, v in scores.items()}
     # Compute max for numerical stability

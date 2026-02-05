@@ -11,9 +11,51 @@ Text/image queries use sync invocation (InvokeModel).
 import json
 import os
 import time
-from typing import Optional
+from typing import Optional, Callable, Any
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
+
+
+def retry_with_exponential_backoff(
+    func: Callable,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    max_delay: float = 32.0,
+    exponential_base: float = 2.0
+) -> Any:
+    """
+    Retry a function with exponential backoff for transient errors.
+
+    Specifically handles Bedrock ModelErrorException which can occur due to
+    temporary service issues.
+    """
+    delay = initial_delay
+
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', '')
+
+            # Only retry on ModelErrorException (transient errors)
+            if error_code == 'ModelErrorException':
+                if attempt == max_retries - 1:
+                    # Last attempt, re-raise the error
+                    raise
+
+                # Log and wait before retrying
+                print(f"Bedrock ModelErrorException (attempt {attempt + 1}/{max_retries}), retrying in {delay:.1f}s...")
+                time.sleep(delay)
+
+                # Exponential backoff with cap
+                delay = min(delay * exponential_base, max_delay)
+            else:
+                # Non-retryable error, re-raise immediately
+                raise
+
+    # Should never reach here, but just in case
+    return func()
 
 
 class BedrockMarengoClient:
@@ -252,13 +294,16 @@ class BedrockMarengoClient:
             }
         }
 
-        response = self.bedrock_client.invoke_model(
-            modelId=self.MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps(request_body)
-        )
+        # Wrap invoke_model with retry logic to handle transient errors
+        def _invoke():
+            return self.bedrock_client.invoke_model(
+                modelId=self.MODEL_ID,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(request_body)
+            )
 
+        response = retry_with_exponential_backoff(_invoke)
         response_body = json.loads(response["body"].read())
 
         # Marengo 3.0 returns {"data": [{"embedding": [...]}]}
@@ -361,23 +406,26 @@ Return ONLY valid JSON in this exact format:
 }}"""
 
         try:
-            response = self.bedrock_client.invoke_model(
-                modelId="anthropic.claude-3-haiku-20240307-v1:0",
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 500,
-                    "temperature": 0.3,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                })
-            )
+            # Wrap invoke_model with retry logic to handle transient errors
+            def _invoke():
+                return self.bedrock_client.invoke_model(
+                    modelId="anthropic.claude-3-haiku-20240307-v1:0",
+                    contentType="application/json",
+                    accept="application/json",
+                    body=json.dumps({
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 500,
+                        "temperature": 0.3,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ]
+                    })
+                )
 
+            response = retry_with_exponential_backoff(_invoke)
             response_body = json.loads(response["body"].read())
 
             # Extract the text content from Claude's response

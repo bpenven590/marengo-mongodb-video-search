@@ -441,7 +441,8 @@ class VideoSearchClient:
         video_id: Optional[str] = None,
         temperature: float = None,
         use_multi_index: bool = False,
-        return_embeddings: bool = False
+        return_embeddings: bool = False,
+        decomposed_queries: Optional[dict] = None
     ) -> dict:
         """
         Search with dynamic intent-based routing (Section 4.3 of whitepaper).
@@ -455,6 +456,7 @@ class VideoSearchClient:
             temperature: Softmax temperature (higher = more uniform weights)
             use_multi_index: If True, use S3 Vectors (separate indexes per modality)
             return_embeddings: If True, include 512d embedding vectors in results
+            decomposed_queries: Optional dict with modality-specific queries
 
         Returns:
             Dict with 'results', 'weights', 'similarities', and optionally 'query_embedding'
@@ -462,7 +464,7 @@ class VideoSearchClient:
         if temperature is None:
             temperature = self.SOFTMAX_TEMPERATURE
 
-        # Generate query embedding
+        # Generate query embedding for dynamic weight computation
         query_result = self.bedrock.get_text_query_embedding(query)
         query_embedding = query_result["embedding"]
 
@@ -476,17 +478,47 @@ class VideoSearchClient:
 
         modalities = ["visual", "audio", "transcription"]
 
+        # Generate modality-specific embeddings if decomposed queries provided
+        query_embeddings = {}
+        if decomposed_queries:
+            print("Dynamic mode using LLM-decomposed queries:")
+            for modality in modalities:
+                decomposed_query = decomposed_queries.get(modality, query)
+                print(f"  {modality}: {decomposed_query}")
+                result = self.bedrock.get_text_query_embedding(decomposed_query)
+                query_embeddings[modality] = result["embedding"]
+        else:
+            # Use same embedding for all modalities
+            for modality in modalities:
+                query_embeddings[modality] = query_embedding
+
         # Use S3 Vectors for multi-index mode
         if use_multi_index:
-            s3v_client = self.get_s3_vectors_client()
-            results = s3v_client.search_with_fusion(
-                query_embedding=query_embedding,
-                modalities=modalities,
-                weights=weights,
-                limit=limit,
-                video_id_filter=video_id,
-                fusion_method="weighted"
-            )
+            # For S3 Vectors with decomposition, we need to search each modality separately
+            if decomposed_queries:
+                modality_results = {}
+                s3v_client = self.get_s3_vectors_client()
+                for modality in modalities:
+                    modality_results[modality] = s3v_client.vector_search(
+                        query_embedding=query_embeddings[modality],
+                        modality=modality,
+                        limit=limit * 2,
+                        video_id_filter=video_id
+                    )
+                # Apply weighted fusion with dynamic weights
+                results = self._weighted_fusion(modality_results, weights, limit)
+            else:
+                # Use original single-embedding approach
+                s3v_client = self.get_s3_vectors_client()
+                results = s3v_client.search_with_fusion(
+                    query_embedding=query_embedding,
+                    modalities=modalities,
+                    weights=weights,
+                    limit=limit,
+                    video_id_filter=video_id,
+                    fusion_method="weighted"
+                )
+
             response = {
                 "results": results,
                 "weights": weights,
@@ -505,6 +537,9 @@ class VideoSearchClient:
             if video_id:
                 filter_doc["video_id"] = video_id
 
+            # Use modality-specific query embedding
+            modality_embedding = query_embeddings[modality]
+
             # Build projection fields
             projection = {
                 "video_id": 1,
@@ -522,7 +557,7 @@ class VideoSearchClient:
                     "$vectorSearch": {
                         "index": self.index_name,
                         "path": "embedding",
-                        "queryVector": query_embedding,
+                        "queryVector": modality_embedding,
                         "numCandidates": limit * 6,
                         "limit": limit * 2,
                         "filter": filter_doc

@@ -245,7 +245,8 @@ async def search_dynamic(request: SearchRequest):
         video_id=request.video_id,
         temperature=request.temperature,
         use_multi_index=request.use_multi_index,
-        return_embeddings=True
+        return_embeddings=True,
+        decomposed_queries=decomposed_queries
     )
 
     results = response["results"]

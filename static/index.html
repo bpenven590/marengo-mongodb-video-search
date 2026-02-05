@@ -1397,7 +1397,7 @@
                         limit: 20,
                         fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
                         use_multi_index: useMultiIndex,
-                        use_decomposition: useDecomposition  // Add decomposition support
+                        use_decomposition: DECOMPOSITION_MODES.includes(currentMode) && useDecomposition
                     };
 
                     if (currentMode === 'weighted') {

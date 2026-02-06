@@ -568,7 +568,10 @@ Before starting, ensure you have:
   - Lambda
   - S3
   - IAM (to create roles)
-- ✅ **MongoDB Atlas Account** (free M0 or M10+ tier)
+- ✅ **Vector Storage Backend** (choose one or both):
+  - **MongoDB Atlas** (free M0 or M10+ tier for multi-index)
+  - **Amazon S3 Vectors** (serverless, pay-per-use)
+  - **Or bring your own** (Pinecone, Weaviate, Qdrant, Milvus - see [Bring Your Own Vector Storage](#-bring-your-own-vector-storage))
 - ✅ **AWS CLI** installed and configured (`aws configure`)
 - ✅ **Python 3.11+** installed
 - ✅ **Git** for cloning the repository

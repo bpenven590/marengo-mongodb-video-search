@@ -4,6 +4,27 @@ A video semantic search pipeline built with AWS Bedrock Marengo 3.0, featuring d
 
 ---
 
+## 📑 Table of Contents
+
+- [Multi-Vector Search Architecture](#-multi-vector-search-architecture)
+- [Fusion Methods](#-fusion-methods)
+  - [Reciprocal Rank Fusion (RRF)](#1-reciprocal-rank-fusion-rrf)
+  - [Weighted Score Fusion](#2-weighted-score-fusion)
+  - [Intent-Based Dynamic Routing](#3-intent-based-dynamic-routing)
+- [LLM Query Decomposition](#-llm-query-decomposition)
+- [Modality Weight Configurations](#️-modality-weight-configurations)
+- [Architecture Overview](#️-architecture-overview)
+- [Search UI Features](#️-search-ui-features)
+- [Project Structure](#-project-structure)
+- [Quick Start](#-quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Installation & Deployment](#installation--deployment)
+- [MongoDB Schema](#-mongodb-schema)
+- [API Reference](#-api-reference)
+- [Environment Variables](#-environment-variables)
+
+---
+
 ## 🎯 Multi-Vector Search Architecture
 
 This system uses a **multi-vector retrieval architecture** where each video segment stores **three separate embedding vectors** (visual, audio, transcription) instead of one combined embedding.
@@ -538,9 +559,29 @@ multi-modal-video-search/
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+Before starting, ensure you have:
+
+- ✅ **AWS Account** with access to:
+  - Bedrock (us-east-1 region for Marengo 3.0)
+  - Lambda
+  - S3
+  - IAM (to create roles)
+- ✅ **MongoDB Atlas Account** (free M0 or M10+ tier)
+- ✅ **AWS CLI** installed and configured (`aws configure`)
+- ✅ **Python 3.11+** installed
+- ✅ **Git** for cloning the repository
+
+### Installation & Deployment
+
+**Complete setup in ~15 minutes:**
+
 ### 1. Clone and Setup
 
 ```bash
+# Clone repository
+git clone https://github.com/YOUR_USERNAME/multi-modal-video-search.git
 cd multi-modal-video-search
 
 # Create virtual environment
@@ -552,7 +593,7 @@ pip install -r requirements.txt
 
 # Copy and configure environment
 cp .env.example .env
-# Edit .env with your MongoDB URI and other settings
+# Edit .env with your credentials (see Environment Variables section below)
 ```
 
 ### 2. Setup MongoDB Atlas
@@ -672,13 +713,43 @@ The architecture is designed to be storage-agnostic - feel free to modify the co
 
 ### 4. Deploy Lambda Function
 
-```bash
-# Set MongoDB URI
-export MONGODB_URI="your_mongodb_connection_string_here"
+The deployment script automates Lambda function creation, IAM role setup, and configuration.
 
-# Deploy
+```bash
+# Make script executable (first time only)
+chmod +x scripts/deploy.sh
+
+# Set required environment variables
+export MONGODB_URI="your_mongodb_connection_string_here"
+export S3_BUCKET="your-media-bucket-name"
+export CLOUDFRONT_DOMAIN="xxxxx.cloudfront.net"
+export S3_VECTORS_BUCKET="your-vectors-bucket-name"  # Optional
+
+# Run deployment script
 ./scripts/deploy.sh
 ```
+
+**What the script does:**
+1. ✅ Validates AWS credentials and region
+2. ✅ Creates IAM role with Bedrock + S3 + CloudWatch permissions
+3. ✅ Packages Python dependencies into deployment zip
+4. ✅ Creates/updates Lambda function with environment variables
+5. ✅ Configures 15-minute timeout and 1024MB memory
+6. ✅ Sets up CloudWatch logging
+
+**Expected output:**
+```
+✅ IAM role created: video-embedding-pipeline-role
+✅ Lambda function deployed: video-embedding-pipeline
+✅ Function size: 2.9 MB
+✅ Timeout: 900 seconds
+✅ Memory: 1024 MB
+```
+
+**Common issues:**
+- `AWS credentials not configured` → Run `aws configure`
+- `Role already exists` → Script will use existing role
+- `Function too large` → Dependencies are cached in `/tmp`
 
 ### 5. Run Search API Locally
 

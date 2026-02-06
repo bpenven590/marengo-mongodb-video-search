@@ -49,7 +49,7 @@ class S3VectorsClient:
 
     def __init__(
         self,
-        bucket_name: str = "your-vectors-bucket-name",
+        bucket_name: Optional[str] = None,
         region: str = "us-east-1",
         profile_name: Optional[str] = None
     ):
@@ -57,10 +57,14 @@ class S3VectorsClient:
         Initialize the S3 Vectors client.
 
         Args:
-            bucket_name: Name of the S3 vector bucket.
+            bucket_name: Name of the S3 vector bucket (reads from S3_VECTORS_BUCKET env var if not provided).
             region: AWS region.
             profile_name: AWS profile to use (default from AWS_PROFILE env var).
         """
+        # Read from environment variable if not provided
+        if bucket_name is None:
+            bucket_name = os.environ.get("S3_VECTORS_BUCKET", "your-vectors-bucket-name")
+
         self.bucket_name = bucket_name
         self.region = region
 
@@ -727,8 +731,8 @@ class S3VectorsClient:
 
 
 def create_client(
-    bucket_name: str = "your-vectors-bucket-name",
+    bucket_name: Optional[str] = None,
     region: str = "us-east-1"
 ) -> S3VectorsClient:
-    """Factory function to create an S3VectorsClient."""
+    """Factory function to create an S3VectorsClient. Reads from S3_VECTORS_BUCKET env var if bucket_name not provided."""
     return S3VectorsClient(bucket_name=bucket_name, region=region)

@@ -103,7 +103,7 @@
         .search-btn {
             padding: 0.75rem 1.5rem;
             background: #4b5563;
-            border: none;
+            border: 2px solid transparent;
             border-radius: 8px;
             color: #fff;
             font-weight: 600;
@@ -1675,7 +1675,7 @@
                         limit: 20,
                         backend: selectedBackend,
                         use_multi_index: useMultiIndex,
-                        use_decomposition: useDecomposition && !currentImageBase64  // Decomposition only for text
+                        use_decomposition: useDecomposition  // Works with text-only and image+text
                     };
                     const response = await fetch('/api/search/dynamic', {
                         method: 'POST',
@@ -1705,7 +1705,7 @@
                         fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
                         backend: selectedBackend,
                         use_multi_index: useMultiIndex,
-                        use_decomposition: DECOMPOSITION_MODES.includes(currentMode) && useDecomposition && !currentImageBase64
+                        use_decomposition: DECOMPOSITION_MODES.includes(currentMode) && useDecomposition  // Works with text-only and image+text
                     };
 
                     if (currentMode === 'weighted') {

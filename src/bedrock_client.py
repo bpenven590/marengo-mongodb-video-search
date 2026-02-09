@@ -283,6 +283,101 @@ class BedrockMarengoClient:
         content = response["Body"].read().decode("utf-8")
         return json.loads(content)
 
+    def get_multimodal_query_embedding(
+        self,
+        query_text: str = None,
+        query_image_base64: str = None
+    ) -> dict:
+        """
+        Generate embedding for a multimodal query (text, image, or both).
+
+        Supports three query modes:
+        1. Text only: query_text provided, query_image_base64 is None
+        2. Image only: query_image_base64 provided, query_text is None
+        3. Image + Text: Both provided (multimodal search)
+
+        Embeddings are cached by a hash of the inputs to avoid redundant API calls.
+
+        Args:
+            query_text: Optional text query
+            query_image_base64: Optional base64-encoded image (JPEG, PNG, GIF, WebP, max 5MB)
+
+        Returns:
+            Dictionary containing the query embedding (512 dimensions)
+
+        Raises:
+            ValueError: If neither text nor image is provided
+        """
+        if not query_text and not query_image_base64:
+            raise ValueError("At least one of query_text or query_image_base64 must be provided")
+
+        # Create cache key from inputs
+        cache_key = f"text:{query_text or ''}_image:{query_image_base64[:50] if query_image_base64 else ''}"
+        if cache_key in self._embedding_cache:
+            return self._embedding_cache[cache_key]
+
+        # Build request body based on input types
+        if query_image_base64 and query_text:
+            # Multimodal: Image + Text
+            request_body = {
+                "inputType": "text",
+                "text": {
+                    "inputText": query_text,
+                    "inputImage": query_image_base64
+                }
+            }
+        elif query_image_base64:
+            # Image only
+            request_body = {
+                "inputType": "text",
+                "text": {
+                    "inputImage": query_image_base64
+                }
+            }
+        else:
+            # Text only (fallback to original behavior)
+            request_body = {
+                "inputType": "text",
+                "text": {
+                    "inputText": query_text
+                }
+            }
+
+        # Wrap invoke_model with retry logic to handle transient errors
+        def _invoke():
+            return self.bedrock_client.invoke_model(
+                modelId=self.MODEL_ID,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(request_body)
+            )
+
+        response = retry_with_exponential_backoff(_invoke)
+        response_body = json.loads(response["body"].read())
+
+        # Marengo 3.0 returns {"data": [{"embedding": [...]}]}
+        embedding = []
+        if "data" in response_body and response_body["data"]:
+            embedding = response_body["data"][0].get("embedding", [])
+        else:
+            embedding = response_body.get("embedding", [])
+
+        result = {
+            "embedding": embedding,
+            "text": query_text,
+            "has_image": bool(query_image_base64)
+        }
+
+        # Cache the result
+        self._embedding_cache[cache_key] = result
+        if len(self._embedding_cache) > self._cache_max_size:
+            # Evict oldest 100 entries
+            keys_to_remove = list(self._embedding_cache.keys())[:100]
+            for key in keys_to_remove:
+                del self._embedding_cache[key]
+
+        return result
+
     def get_text_query_embedding(self, query_text: str) -> dict:
         """
         Generate embedding for a text query (synchronous).

@@ -202,13 +202,19 @@ class BedrockMarengoClient:
         print(f"Input: {s3_uri}")
         print(f"Output: {output_uri}")
 
+        # Get Bedrock service role from environment (required for S3 access)
+        bedrock_role_arn = os.environ.get("BEDROCK_SERVICE_ROLE_ARN")
+        if not bedrock_role_arn:
+            raise ValueError("BEDROCK_SERVICE_ROLE_ARN environment variable not set")
+
         # Start async invocation
         response = self.bedrock_client.start_async_invoke(
             modelId=self.MODEL_ID,
             modelInput=model_input,
             outputDataConfig={
                 "s3OutputDataConfig": {
-                    "s3Uri": output_uri
+                    "s3Uri": output_uri,
+                    "serviceRoleArn": bedrock_role_arn
                 }
             }
         )

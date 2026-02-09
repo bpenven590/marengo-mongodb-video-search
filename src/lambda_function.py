@@ -106,10 +106,12 @@ def lambda_handler(event: dict, context) -> dict:
 
         # Output bucket for async results (same as input bucket)
         output_bucket = os.environ.get("OUTPUT_BUCKET", bucket)
+        service_role_arn = os.environ.get("BEDROCK_SERVICE_ROLE_ARN")
         bedrock_client = BedrockMarengoClient(
             region="us-east-1",
             output_bucket=output_bucket,
-            output_prefix="embeddings/"
+            output_prefix="embeddings/",
+            service_role_arn=service_role_arn
         )
 
         mongodb_uri = os.environ.get("MONGODB_URI")

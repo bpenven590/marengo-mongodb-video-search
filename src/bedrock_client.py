@@ -75,6 +75,7 @@ class BedrockMarengoClient:
         output_bucket: Optional[str] = None,
         output_prefix: str = "marengo-output/",
         account_id: Optional[str] = None,
+        service_role_arn: Optional[str] = None,
         s3_client: Optional[boto3.client] = None,
         bedrock_client: Optional[boto3.client] = None
     ):
@@ -86,12 +87,14 @@ class BedrockMarengoClient:
             output_bucket: S3 bucket for async output (defaults to input bucket)
             output_prefix: S3 prefix for async output files
             account_id: AWS account ID (auto-detected if not provided)
+            service_role_arn: IAM role ARN for Bedrock to assume for S3 access
             s3_client: Optional pre-configured S3 client
             bedrock_client: Optional pre-configured Bedrock Runtime client
         """
         self.region = region
         self.output_bucket = output_bucket
         self.output_prefix = output_prefix
+        self.service_role_arn = service_role_arn
 
         config = Config(
             region_name=region,
@@ -209,6 +212,7 @@ class BedrockMarengoClient:
         print(f"ModelInput: {json.dumps(model_input, indent=2)}")
 
         # Start async invocation
+        # Note: Bedrock accesses S3 via bucket policy, not serviceRoleArn parameter
         response = self.bedrock_client.start_async_invoke(
             modelId=self.MODEL_ID,
             modelInput=model_input,

@@ -212,8 +212,7 @@ class BedrockMarengoClient:
             modelInput=model_input,
             outputDataConfig={
                 "s3OutputDataConfig": {
-                    "s3Uri": output_uri,
-                    "bucketOwner": self.account_id
+                    "s3Uri": output_uri
                 }
             }
         )

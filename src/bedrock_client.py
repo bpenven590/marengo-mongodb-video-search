@@ -327,10 +327,11 @@ class BedrockMarengoClient:
                 }
             }
         elif query_image_base64:
-            # Image only
+            # Image only - inputText is required by API even if empty
             request_body = {
                 "inputType": "text",
                 "text": {
+                    "inputText": "",
                     "inputImage": query_image_base64
                 }
             }

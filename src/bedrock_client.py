@@ -205,6 +205,8 @@ class BedrockMarengoClient:
         print(f"Starting async video embedding job...")
         print(f"Input: {s3_uri}")
         print(f"Output: {output_uri}")
+        print(f"BucketOwner: {bucket_owner}")
+        print(f"ModelInput: {json.dumps(model_input, indent=2)}")
 
         # Start async invocation
         response = self.bedrock_client.start_async_invoke(

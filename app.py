@@ -63,7 +63,7 @@ def get_search_client() -> VideoSearchClient:
 
 class SearchRequest(BaseModel):
     """Search request body."""
-    query: str
+    query: Optional[str] = ""  # Optional for image-only searches
     query_image: Optional[str] = None  # Base64-encoded image for image-to-video search
     modalities: Optional[list] = None
     weights: Optional[dict] = None
